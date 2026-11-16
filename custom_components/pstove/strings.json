@@ -1,0 +1,33 @@
+{
+  "title": "Pellet Stove",
+  "config": {
+    "step": {
+      "user": {
+        "title": "Connect a pellet stove",
+        "description": "Enter the stove hostname or address.",
+        "data": {
+          "host": "Host",
+          "name": "Name"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Unable to connect to the stove.",
+      "unknown": "The stove returned an unexpected response."
+    },
+    "abort": {
+      "already_configured": "This stove is already configured."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Polling options",
+        "data": {
+          "scan_interval": "Polling interval (seconds)"
+        },
+        "description": "Common status and preferences are polled every 10\u2013300 seconds. Diagnostics are fetched at most every 300 seconds."
+      }
+    }
+  }
+}
