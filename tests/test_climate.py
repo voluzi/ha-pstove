@@ -3,7 +3,7 @@ from dataclasses import replace
 import pytest
 from aiopelletstove import PelletStoveResponseError, PowerState
 from aiopelletstove.registers import POWER_LEVEL, TARGET_TEMPERATURE
-from homeassistant.exceptions import HomeAssistantError
+from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 
 
 async def test_climate_controls(hass, setup_entry, mock_stove):
@@ -65,3 +65,17 @@ async def test_power_command_error_becomes_home_assistant_error(
             {"entity_id": "climate.pellet_stove_thermostat"},
             blocking=True,
         )
+
+
+async def test_fractional_temperature_is_rejected(hass, setup_entry, mock_stove):
+    with pytest.raises(ServiceValidationError) as error:
+        await hass.services.async_call(
+            "climate",
+            "set_temperature",
+            {"entity_id": "climate.pellet_stove_thermostat", "temperature": 23.5},
+            blocking=True,
+        )
+    assert error.value.translation_domain == "pstove"
+    assert error.value.translation_key == "whole_temperature_required"
+    assert "must be a whole number of degrees Celsius" in str(error.value)
+    mock_stove.async_write.assert_not_awaited()

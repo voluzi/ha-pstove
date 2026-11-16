@@ -15,6 +15,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ServiceValidationError
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
+from .const import DOMAIN
 from .coordinator import PstoveConfigEntry
 from .entity import PstoveEntity
 
@@ -89,10 +90,16 @@ class PstoveClimate(PstoveEntity, ClimateEntity):
 
     async def async_set_temperature(self, **kwargs: Any) -> None:
         if ATTR_TEMPERATURE in kwargs:
+            temperature = float(kwargs[ATTR_TEMPERATURE])
+            if not temperature.is_integer():
+                raise ServiceValidationError(
+                    translation_domain=DOMAIN,
+                    translation_key="whole_temperature_required",
+                )
             await self.async_command(
                 self.coordinator.client.async_write(
                     TARGET_TEMPERATURE,
-                    float(kwargs[ATTR_TEMPERATURE]),
+                    int(temperature),
                 )
             )
 

@@ -39,12 +39,12 @@ class PstoveSelect(PstoveEntity, SelectEntity):
         self._channel = channel
 
     @property
-    def current_option(self) -> str:
+    def current_option(self) -> str | None:
         state = self.coordinator.data
         fan = (
             state.fan2_regulation if self._channel == "fan2" else state.fan3_regulation
         )
-        return fan.value
+        return fan.value if fan is not None else None
 
     async def async_select_option(self, option: str) -> None:
         await self.async_command(

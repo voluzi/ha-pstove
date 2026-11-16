@@ -13,7 +13,8 @@
     },
     "error": {
       "cannot_connect": "Unable to connect to the stove.",
-      "unknown": "The stove returned an unexpected response."
+      "unknown": "The stove returned an unexpected response.",
+      "invalid_host": "Enter a hostname or address without a URL scheme or path."
     },
     "abort": {
       "already_configured": "This stove is already configured."
@@ -28,6 +29,11 @@
         },
         "description": "Common status and preferences are polled every 10\u2013300 seconds. Diagnostics are fetched at most every 300 seconds."
       }
+    }
+  },
+  "exceptions": {
+    "whole_temperature_required": {
+      "message": "Target temperature must be a whole number of degrees Celsius."
     }
   }
 }

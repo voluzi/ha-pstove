@@ -1,7 +1,12 @@
+from datetime import timedelta
 from unittest.mock import patch
 
 import pytest
-from aiopelletstove import PelletStoveConnectionError, PelletStoveResponseError
+from aiopelletstove import (
+    PelletStove,
+    PelletStoveConnectionError,
+    PelletStoveResponseError,
+)
 from homeassistant import config_entries, data_entry_flow
 
 
@@ -70,3 +75,31 @@ async def test_options_reject_out_of_range(hass, setup_entry, interval):
     result = await hass.config_entries.options.async_init(setup_entry.entry_id)
     with pytest.raises(vol.Invalid):
         result["data_schema"]({"scan_interval": interval})
+
+
+@pytest.mark.parametrize("host", ["http://stove.example", "stove.example/path"])
+async def test_invalid_host_has_field_error_without_unique_id(hass, mock_stove, host):
+    with patch(
+        "custom_components.pstove.config_flow.PelletStove", side_effect=PelletStove
+    ):
+        result = await hass.config_entries.flow.async_init(
+            "pstove",
+            context={"source": config_entries.SOURCE_USER},
+            data={"host": host},
+        )
+    assert result["type"] is data_entry_flow.FlowResultType.FORM
+    assert result["errors"] == {"host": "invalid_host"}
+    assert (
+        hass.config_entries.flow.async_get(result["flow_id"])["context"].get(
+            "unique_id"
+        )
+        is None
+    )
+    mock_stove.async_get_state.assert_not_awaited()
+
+
+async def test_stored_poll_interval_is_used(hass, entry, mock_stove):
+    hass.config_entries.async_update_entry(entry, options={"scan_interval": 60})
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+    assert entry.runtime_data.update_interval == timedelta(seconds=60)

@@ -7,6 +7,7 @@ from aiopelletstove import (
     PelletStove,
     PelletStoveConnectionError,
     PelletStoveError,
+    PelletStoveValueError,
 )
 from homeassistant.config_entries import (
     ConfigEntry,
@@ -38,27 +39,32 @@ class PstoveConfigFlow(ConfigFlow, domain=DOMAIN):
         errors: dict[str, str] = {}
         if user_input is not None:
             host = str(user_input[CONF_HOST]).strip().lower().rstrip(".")
-            await self.async_set_unique_id(host)
-            self._abort_if_unique_id_configured()
             try:
                 client = PelletStove(
                     host,
                     session=async_get_clientsession(self.hass),
                     timeout=REQUEST_TIMEOUT,
                 )
-                await client.async_get_state(include_diagnostics=False)
-            except PelletStoveConnectionError:
-                errors["base"] = "cannot_connect"
-            except PelletStoveError:
-                errors["base"] = "unknown"
+            except PelletStoveValueError:
+                errors[CONF_HOST] = "invalid_host"
             else:
-                name = (
-                    str(user_input.get(CONF_NAME, DEFAULT_NAME)).strip() or DEFAULT_NAME
-                )
-                return self.async_create_entry(
-                    title=name,
-                    data={CONF_HOST: host, CONF_NAME: name},
-                )
+                await self.async_set_unique_id(host)
+                self._abort_if_unique_id_configured()
+                try:
+                    await client.async_get_state(include_diagnostics=False)
+                except PelletStoveConnectionError:
+                    errors["base"] = "cannot_connect"
+                except PelletStoveError:
+                    errors["base"] = "unknown"
+                else:
+                    name = (
+                        str(user_input.get(CONF_NAME, DEFAULT_NAME)).strip()
+                        or DEFAULT_NAME
+                    )
+                    return self.async_create_entry(
+                        title=name,
+                        data={CONF_HOST: host, CONF_NAME: name},
+                    )
         return self.async_show_form(
             step_id="user",
             data_schema=vol.Schema(

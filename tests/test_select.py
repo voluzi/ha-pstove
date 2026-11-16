@@ -1,3 +1,5 @@
+from dataclasses import replace
+
 import pytest
 from homeassistant.helpers import entity_registry as er
 
@@ -18,3 +20,13 @@ async def test_select_calls_packed_fan_api(
         blocking=True,
     )
     mock_stove.async_set_fan_regulation.assert_awaited_once_with(f"fan{channel}", "4")
+
+
+async def test_unknown_fan_only_affects_its_select(
+    hass, setup_entry, mock_stove, stove_state
+):
+    mock_stove.async_get_state.return_value = replace(stove_state, fan2_regulation=None)
+    await setup_entry.runtime_data.async_refresh()
+    assert hass.states.get("select.pellet_stove_fan_2_regulation").state == "unknown"
+    assert hass.states.get("select.pellet_stove_fan_3_regulation").state == "auto"
+    assert hass.states.get("sensor.pellet_stove_air_temperature").state == "21.5"

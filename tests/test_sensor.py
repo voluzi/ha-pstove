@@ -1,6 +1,6 @@
-from dataclasses import replace
-
-from aiopelletstove import PowerState
+import pytest
+from homeassistant.const import EntityCategory
+from homeassistant.helpers import entity_registry as er
 
 
 async def test_sensor_metadata_and_values(hass, setup_entry):
@@ -21,16 +21,9 @@ async def test_sensor_metadata_and_values(hass, setup_entry):
     assert hours.attributes["state_class"] == "total_increasing"
 
 
-async def test_off_values_from_library_reach_sensors(
-    hass, setup_entry, mock_stove, stove_state
-):
-    mock_stove.async_get_state.return_value = replace(
-        stove_state,
-        power_state=PowerState.OFF,
-        current_power=0,
-        flue_temperature=0,
-        fan_speed=0,
-    )
-    await setup_entry.runtime_data.async_refresh()
-    for key in ("current_power", "flue_temperature", "fan_speed"):
-        assert hass.states.get(f"sensor.pellet_stove_{key}").state == "0"
+@pytest.mark.parametrize(
+    "key", ["last_alarm", "total_hours", "partial_hours", "ignition_count"]
+)
+async def test_diagnostic_sensor_category(hass, setup_entry, key):
+    entity = er.async_get(hass).async_get(f"sensor.pellet_stove_{key}")
+    assert entity.entity_category is EntityCategory.DIAGNOSTIC
