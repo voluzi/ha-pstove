@@ -70,7 +70,7 @@ async def test_options_reload(hass, setup_entry, reload_entry, interval):
 
 @pytest.mark.parametrize("interval", [9, 301])
 async def test_options_reject_out_of_range(hass, setup_entry, interval):
-    import voluptuous as vol
+    from custom_components.pstove.config_flow import vol
 
     result = await hass.config_entries.options.async_init(setup_entry.entry_id)
     with pytest.raises(vol.Invalid):

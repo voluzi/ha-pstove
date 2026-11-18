@@ -1,12 +1,17 @@
+from importlib.util import find_spec
 from unittest.mock import AsyncMock, patch
 
 import pytest
 from aiopelletstove import FanRegulation, PowerState, StoveState
-from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.pstove.const import DOMAIN
 
-pytest_plugins = ["pytest_homeassistant_custom_component"]
+if find_spec("pytest_homeassistant"):
+    from pytest_homeassistant.common import MockConfigEntry
+else:
+    from pytest_homeassistant_custom_component.common import MockConfigEntry
+
+    pytest_plugins = ["pytest_homeassistant_custom_component"]
 
 
 @pytest.fixture(autouse=True)

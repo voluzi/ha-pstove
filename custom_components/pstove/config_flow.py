@@ -1,8 +1,7 @@
 """User setup and polling options."""
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-import voluptuous as vol
 from aiopelletstove import (
     PelletStove,
     PelletStoveConnectionError,
@@ -18,6 +17,14 @@ from homeassistant.config_entries import (
 from homeassistant.const import CONF_HOST, CONF_NAME
 from homeassistant.core import callback
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
+
+if TYPE_CHECKING:
+    import probatio as vol
+else:
+    try:
+        import probatio as vol
+    except ModuleNotFoundError:
+        import voluptuous as vol
 
 from .const import (
     CONF_SCAN_INTERVAL,

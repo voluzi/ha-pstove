@@ -1,6 +1,6 @@
 """Pellet stove thermostat with five power presets."""
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from aiopelletstove import PowerState
 from aiopelletstove.registers import POWER_LEVEL, TARGET_TEMPERATURE
@@ -33,7 +33,7 @@ async def async_setup_entry(
 class PstoveClimate(PstoveEntity, ClimateEntity):
     _attr_hvac_modes = [HVACMode.OFF, HVACMode.HEAT]
     _attr_preset_modes = PRESETS
-    _attr_temperature_unit = UnitOfTemperature.CELSIUS
+    _attr_native_temperature_unit = UnitOfTemperature.CELSIUS
     _attr_min_temp = 7
     _attr_max_temp = 40
     _attr_target_temperature_step = 1
@@ -49,11 +49,11 @@ class PstoveClimate(PstoveEntity, ClimateEntity):
         super().__init__(entry, "thermostat", "Thermostat")
 
     @property
-    def current_temperature(self) -> float:
+    def native_current_temperature(self) -> float:
         return self.coordinator.data.air_temperature
 
     @property
-    def target_temperature(self) -> float:
+    def native_target_temperature(self) -> float:
         return self.coordinator.data.target_temperature
 
     @property
@@ -74,6 +74,11 @@ class PstoveClimate(PstoveEntity, ClimateEntity):
     @property
     def preset_mode(self) -> str:
         return f"Level {self.coordinator.data.power_level}"
+
+    if not TYPE_CHECKING and not hasattr(ClimateEntity, "native_temperature_unit"):
+        _attr_temperature_unit = _attr_native_temperature_unit
+        current_temperature = native_current_temperature
+        target_temperature = native_target_temperature
 
     async def async_set_hvac_mode(self, hvac_mode: HVACMode) -> None:
         if hvac_mode not in self._attr_hvac_modes:
