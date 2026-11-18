@@ -1,95 +1,134 @@
 # Pellet Stove for Home Assistant
 
-A HACS custom integration (`pstove`) for local Wi-Fi pellet stoves using the
-Micronova-style HTTP register protocol. Requires Home Assistant **2025.4.4+**.
-The typed async protocol lives in the separate `aiopelletstove` package.
+[![Marketplace and HACS: custom repository](https://img.shields.io/badge/Marketplace%20%2F%20HACS-custom%20repository-41BDF5)](#installation)
+[![Latest GitHub release](https://img.shields.io/github/v/release/voluzi/ha-pstove)](https://github.com/voluzi/ha-pstove/releases/latest)
+[![Tests](https://github.com/voluzi/ha-pstove/actions/workflows/test.yml/badge.svg?branch=main)](https://github.com/voluzi/ha-pstove/actions/workflows/test.yml)
+[![Validation](https://github.com/voluzi/ha-pstove/actions/workflows/validate.yml/badge.svg?branch=main)](https://github.com/voluzi/ha-pstove/actions/workflows/validate.yml)
+[![MIT license](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
+
+Control your Wi-Fi pellet stove from Home Assistant over your local network.
+Use the thermostat to set temperature and power level, adjust stove
+preferences, and monitor heating and maintenance.
+
+## Features
+
+- On and off control, a temperature setpoint, and five power presets.
+- Standby, buzzer, and fan settings, including two independent regulation controls.
+- Room and flue temperatures, current power, fan speed, alarms, and usage counters.
+
+## Compatibility
+
+Use a Wi-Fi pellet stove or module that implements the Micronova-style local
+HTTP RAM and EEPROM register API with the
+[`aiopelletstove` register layout](https://github.com/voluzi/aiopelletstove/blob/main/src/aiopelletstove/registers.py).
+Compatibility depends on the Wi-Fi module and firmware as well as the stove
+model. There is no verified model list; a Micronova controller alone does not
+guarantee compatibility. The integration requires Home Assistant **2025.4.4
+or later**.
+
+The integration uses [`aiopelletstove`](https://github.com/voluzi/aiopelletstove)
+with a five-second timeout per HTTP request. The local API uses plain HTTP
+without a login handshake. Keep it on your local network.
 
 ## Installation
 
-After the library is published as `aiopelletstove==1.0.0`, add
-`https://github.com/voluzi/ha-pstove` as a HACS custom repository, category
-**Integration**, install it, and restart Home Assistant. Alternatively copy
-`custom_components/pstove` into your configuration's `custom_components` directory.
-Add **Pellet Stove** in Settings → Devices & services and enter the stove's host
-and an optional name. No login or additional authentication is used by this protocol.
+**Marketplace (Home Assistant 2026.11 or later)**
 
-The host identifies each entry. Multiple stoves are supported; changing a host
-requires removing and re-adding its entry. Use a stable hostname or address.
-Communication is plain local HTTP with a five-second request timeout.
+1. In **Settings → Marketplace**, select **Add from link** in the upper right.
+   If prompted, connect your GitHub account. This adds the project as a
+   [custom repository](https://www.home-assistant.io/integrations/marketplace/#custom-repositories).
+2. Enter `https://github.com/voluzi/ha-pstove`, select **Add**, and choose
+   **Integration** if asked for a type.
+3. Open **Pellet Stove** and select **Install**. If setup does not open, go to
+   **Settings → Devices & services → Add integration** and search for **Pellet Stove**.
+   Restart Home Assistant if prompted.
+
+On an earlier supported Home Assistant version, add the same URL in
+**HACS → Custom repositories** as an **Integration**, install it, then restart.
+
+**Manual install**
+
+1. Download `pstove.zip` from the [latest release](https://github.com/voluzi/ha-pstove/releases/latest)
+   and extract it into `custom_components/pstove/` under your Home Assistant
+   configuration directory. If using the release source archive, copy its
+   `custom_components/pstove/` directory instead. The manifest should end up
+   at `custom_components/pstove/manifest.json`.
+2. Restart Home Assistant and add **Pellet Stove** in **Settings → Devices & services**.
+   Home Assistant installs the Python dependency automatically.
+
+## Configuration
+
+Enter the stove's hostname or IP address without a URL scheme or path. The
+optional name defaults to **Pellet Stove**. Add a separate entry for each stove.
+
+A module that reports its MAC address through `/api/id` keeps its identity
+when its IP changes. Use **Reconfigure** on the integration entry to enter
+its new address. If the module cannot report a MAC, Home Assistant uses the
+configured host as its identity. For these modules, use a stable DNS name or
+a DHCP reservation. If the configured host itself must change, remove the
+entry and add it again.
+
+Under **Configure**, the polling interval defaults to 10 seconds and accepts
+10–300 seconds. Diagnostic registers are requested at most every five minutes;
+the last successful values remain visible between reads.
 
 ## Entities
 
-| Platform | Controls or readings |
-| --- | --- |
-| Climate | Thermostat: off/heat, 7–40 °C in whole degrees, Level 1–5 presets |
-| Switch | Standby, buzzer, fan enabled |
-| Select | Fan 2 and Fan 3 regulation: off, 1–5, auto |
-| Sensor | Power state, air/flue temperature, current power level, fan speed (rpm) |
-| Diagnostic sensor | Last alarm, total hours, partial hours, ignition count |
+Names below are shown without the device name prefix.
 
-Preferences and fan selects are configuration entities. All entities share one
-device. Climate HVAC mode (OFF/HEAT) and turn on/off control power through the
-library: the current state is read before a toggle; final cleaning blocks toggles.
-Fan controls preserve the other channel of the packed register. OFF zeroes stale
-current power, flue temperature, and fan speed in the library.
+| Platform | Name | Description | Unit |
+| --- | --- | --- | --- |
+| Climate | Thermostat | On and off, target temperature (7–40 in whole degrees), and Level 1–5 power presets | °C |
+| Switch | Standby | Enable the stove's standby mode | — |
+| Switch | Buzzer | Enable the audible buzzer | — |
+| Switch | Fan | Enable the fan | — |
+| Select | Fan 2 regulation | Fan 2 setting: off, levels 1–5, or auto | — |
+| Select | Fan 3 regulation | Fan 3 setting: off, levels 1–5, or auto | — |
+| Sensor | Power state | Operating state, such as lighting, on, standby, or alarm | — |
+| Sensor | Air temperature | Temperature measured at the stove's room sensor | °C |
+| Sensor | Flue temperature | Exhaust temperature reported by the stove | °C |
+| Sensor | Current power | Active power level reported by the controller | level |
+| Sensor | Fan speed | Reported fan rotation speed | rpm |
+| Sensor | Last alarm | Last alarm code reported by the controller | — |
+| Sensor | Ignition count | Number of ignitions | count |
+| Sensor | Total hours | Total operating time | h |
+| Sensor | Partial hours | Operating time on the stove's partial counter | h |
 
-Common status and preferences poll every **10 seconds** by default. Integration
-options allow **10–300 seconds** and reload the entry. Diagnostics are requested
-at most once per **300 seconds** within a loaded entry, including failed attempts;
-prior successful counter values remain between requests. Commands request a
-coordinator refresh. Failed polling marks entities unavailable and a successful
-poll restores them. No retries occur within a cycle.
+## Actions
 
-Power state text preserves legacy values: `off`, `awaiting_flame`, `lighting`,
-`on` (running or ashpan cleaning), `final_cleaning`, `standby`, `alarm`,
-`alarm_memory`. Climate shows heating while starting/running, idle when running
-with zero current power, and off in other states.
+Use the standard Home Assistant actions; there are no integration-specific
+actions. Target the thermostat with `climate.turn_on`, `climate.turn_off`,
+`climate.set_hvac_mode` (`heat` or `off`), `climate.set_temperature`, or
+`climate.set_preset_mode` (for example, `Level 3`). Use `switch.turn_on` and
+`switch.turn_off` for preferences, and `select.select_option` for fan regulation.
 
-## Migration from an MQTT bridge
+The integration checks the power state before toggling; it does not toggle
+during final cleaning or when the stove reports an unknown state.
 
-1. Install and configure the native integration alongside the bridge; compare
-   readings and controls through a full heating cycle.
-2. Stop the bridge and clear its retained discovery configurations. Remove its
-   old device from Home Assistant to release its entity IDs.
-3. Rename each native entity ID to its previous ID in Settings → Entities. Match
-   sensors/switches by name; match fan selects by channel and climate by thermostat.
-4. Review automations: the native climate entity becomes unavailable during
-   outages, unlike an always-online bridge. Use climate HVAC mode or turn on/off
-   for power commands.
+## Diagnostics and troubleshooting
 
-Default entity IDs use the device name (for example,
-`climate.pellet_stove_thermostat` and `select.pellet_stove_fan_2_regulation`).
-No automatic entity migration is performed. For rollback, remove the native
-integration and restart the old bridge; it can recreate its discovery entities.
+Last alarm, ignition count, and the two hour counters are diagnostic sensors.
+There is no downloadable diagnostics file. For a support issue, share the
+entity readings and relevant **Settings → System → Logs** entries with
+private addresses and identifiers removed.
 
-## Local development
+- **Setup cannot connect:** Confirm that Home Assistant can reach the stove's
+  local HTTP interface. Check the configured hostname or address and port.
+- **Entities are unavailable:** A failed poll makes them unavailable until a
+  successful poll. Check the network and whether the configured address has changed.
+- **Power or speed reads zero while the stove is off:** The client reports zero
+  for stale power, flue temperature, and fan speed readings when the stove is
+  off or reports an unknown power state.
+- **A fan setting is missing or rejected:** The firmware may have reported an
+  unsupported fan value. A channel cannot be changed if the other channel's
+  value cannot be preserved.
 
-Use a separate virtual environment. Install the library from the sibling checkout
-while leaving the manifest requirement pinned for release:
+## Contributing
 
-```sh
-python3.13 -m venv .venv
-.venv/bin/pip install -r requirements_test.txt
-.venv/bin/pip install -e ../aiopelletstove
-.venv/bin/ruff check .
-.venv/bin/ruff format --check .
-.venv/bin/mypy --strict custom_components
-.venv/bin/pytest -q
-```
+See [CONTRIBUTING.md](CONTRIBUTING.md) for local checks and [CHANGELOG.md](CHANGELOG.md)
+for release notes. Report vulnerabilities privately as described in
+[SECURITY.md](SECURITY.md).
 
-Tests mock `aiopelletstove`, use reserved example hostnames, and block network
-sockets through the HA harness. The registry contract and all four platforms are
-covered. CI targets HA 2025.4.4 and 2026.2.3 (Python 3.13); its package install
-requires the library release first. Local verification uses the editable sibling.
+## License
 
-## Releases and branding
-
-Set up the library's PyPI trusted publisher and release it before tagging this
-integration `v1.0.0`. HACS consumes integration tags/GitHub releases. The manifest
-and HACS metadata retain the repository/documentation URLs for future publication.
-Nothing is published by local development.
-
-Placeholder `brands/pstove/icon.png` (256×256) and `logo.png` (512×256) are included.
-Frontend branding requires a separate submission to `home-assistant/brands`;
-these local files alone do not register a frontend brand. HACS validation skips
-the central brands check until that submission. MIT © Voluzi.
+[MIT](LICENSE).
