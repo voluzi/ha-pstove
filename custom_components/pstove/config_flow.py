@@ -90,8 +90,12 @@ class PstoveConfigFlow(ConfigFlow, domain=DOMAIN):
                     except StoveIdentityUnavailableError:
                         mac = None
                     if entry is None:
-                        await self.async_set_unique_id(mac or host)
-                        self._abort_if_unique_id_configured()
+                        existing = await self.async_set_unique_id(mac or host)
+                        self._abort_if_unique_id_configured(
+                            updates={CONF_HOST: host},
+                            reload_on_update=existing is None
+                            or not existing.update_listeners,
+                        )
                         name = (
                             str(user_input.get(CONF_NAME, DEFAULT_NAME)).strip()
                             or DEFAULT_NAME
