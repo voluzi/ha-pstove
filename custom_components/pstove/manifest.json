@@ -10,6 +10,7 @@
   "integration_type": "device",
   "iot_class": "local_polling",
   "issue_tracker": "https://github.com/voluzi/ha-pstove/issues",
+  "loggers": ["aiopelletstove"],
   "requirements": [
     "aiopelletstove==1.0.0"
   ],
