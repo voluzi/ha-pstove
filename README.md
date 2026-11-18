@@ -63,7 +63,8 @@ optional name defaults to **Pellet Stove**. Add a separate entry for each stove.
 
 A module that reports its MAC address through `/api/id` keeps its identity
 when its IP changes. Use **Reconfigure** on the integration entry to enter
-its new address. If the module cannot report a MAC, Home Assistant uses the
+its new address. Adding the same stove at its new address also updates the
+existing entry. If the module cannot report a MAC, Home Assistant uses the
 configured host as its identity. For these modules, use a stable DNS name or
 a DHCP reservation. If the configured host itself must change, remove the
 entry and add it again.
@@ -87,7 +88,7 @@ Names below are shown without the device name prefix.
 | Sensor | Power state | Operating state, such as lighting, on, standby, or alarm | — |
 | Sensor | Air temperature | Temperature measured at the stove's room sensor | °C |
 | Sensor | Flue temperature | Exhaust temperature reported by the stove | °C |
-| Sensor | Current power | Active power level reported by the controller | level |
+| Sensor | Current power | Active power level reported by the controller | — |
 | Sensor | Fan speed | Reported fan rotation speed | rpm |
 | Sensor | Last alarm | Last alarm code reported by the controller | — |
 | Sensor | Ignition count | Number of ignitions | count |
