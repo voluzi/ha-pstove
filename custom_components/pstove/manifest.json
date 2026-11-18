@@ -1,6 +1,7 @@
 {
   "domain": "pstove",
   "name": "Pellet Stove",
+  "categories": ["climate.thermostats_heating"],
   "codeowners": [
     "@helder-moreira"
   ],
