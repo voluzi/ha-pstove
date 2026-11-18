@@ -36,7 +36,7 @@ from .const import (
     MIN_SCAN_INTERVAL,
     REQUEST_TIMEOUT,
 )
-from .identity import async_get_stove_mac
+from .identity import StoveIdentityUnavailableError, async_get_stove_mac
 
 
 class PstoveConfigFlow(ConfigFlow, domain=DOMAIN):
@@ -85,7 +85,10 @@ class PstoveConfigFlow(ConfigFlow, domain=DOMAIN):
                 except PelletStoveError:
                     errors["base"] = "unknown"
                 else:
-                    mac = await async_get_stove_mac(self.hass, host)
+                    try:
+                        mac = await async_get_stove_mac(self.hass, host)
+                    except StoveIdentityUnavailableError:
+                        mac = None
                     if entry is None:
                         await self.async_set_unique_id(mac or host)
                         self._abort_if_unique_id_configured()

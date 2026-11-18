@@ -1,6 +1,8 @@
 from dataclasses import replace
 from unittest.mock import patch
 
+import pytest
+from aiohttp import ClientConnectionError
 from aiopelletstove import PelletStoveConnectionError
 from homeassistant.config_entries import ConfigEntryState
 from homeassistant.helpers import entity_registry as er
@@ -135,3 +137,34 @@ async def test_mac_upgrade_preserves_existing_device_and_entities(
     }
     assert after == before
     assert hass.states.get("climate.pellet_stove_thermostat").state == "heat"
+
+
+@pytest.mark.parametrize("error", [ClientConnectionError, TimeoutError])
+async def test_mac_upgrade_retries_after_connection_failure(
+    hass, aioclient_mock, entry, mock_stove, error
+):
+    hass.config_entries.async_update_entry(entry, minor_version=1)
+    aioclient_mock.get("http://stove.example/api/id", exc=error())
+
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    assert entry.minor_version == 1
+    assert entry.unique_id == "stove.example"
+
+    assert await hass.config_entries.async_unload(entry.entry_id)
+    aioclient_mock.clear_requests()
+    aioclient_mock.get("http://stove.example/api/id", json={"mac": "020000000001"})
+
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    assert entry.minor_version == 2
+    assert entry.unique_id == "02:00:00:00:00:01"
+
+
+async def test_mac_upgrade_finishes_when_identity_endpoint_returns_404(
+    hass, aioclient_mock, entry, mock_stove
+):
+    hass.config_entries.async_update_entry(entry, minor_version=1)
+    aioclient_mock.get("http://stove.example/api/id", status=404)
+
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    assert entry.minor_version == 2
+    assert entry.unique_id == "stove.example"

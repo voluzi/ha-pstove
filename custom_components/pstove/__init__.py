@@ -13,7 +13,7 @@ from .const import (
     REQUEST_TIMEOUT,
 )
 from .coordinator import PstoveConfigEntry, PstoveDataUpdateCoordinator
-from .identity import async_get_stove_mac
+from .identity import StoveIdentityUnavailableError, async_get_stove_mac
 
 
 async def async_migrate_entry(hass: HomeAssistant, entry: PstoveConfigEntry) -> bool:
@@ -22,7 +22,10 @@ async def async_migrate_entry(hass: HomeAssistant, entry: PstoveConfigEntry) -> 
     if entry.minor_version >= ENTRY_MINOR_VERSION:
         return True
 
-    mac = await async_get_stove_mac(hass, entry.data[CONF_HOST])
+    try:
+        mac = await async_get_stove_mac(hass, entry.data[CONF_HOST])
+    except StoveIdentityUnavailableError:
+        return True
     if mac and not hass.config_entries.async_entry_for_domain_unique_id(DOMAIN, mac):
         registry_id = entry.unique_id or entry.entry_id
         hass.config_entries.async_update_entry(

@@ -12,6 +12,10 @@ from .const import REQUEST_TIMEOUT
 _MAC = re.compile(r"[0-9a-f]{2}([:-]?)(?:[0-9a-f]{2}\1){4}[0-9a-f]{2}")
 
 
+class StoveIdentityUnavailableError(Exception):
+    """The identity request failed before a response could be read."""
+
+
 async def async_get_stove_mac(hass: HomeAssistant, host: str) -> str | None:
     """Return a unicast MAC on modules that implement the identity endpoint."""
     session = async_get_clientsession(hass)
@@ -24,7 +28,9 @@ async def async_get_stove_mac(hass: HomeAssistant, host: str) -> str | None:
             if response.status != 200:
                 return None
             payload = await response.json(content_type=None)
-    except (ClientError, TimeoutError, ValueError):
+    except (ClientError, TimeoutError) as err:
+        raise StoveIdentityUnavailableError from err
+    except ValueError:
         return None
 
     value = payload.get("mac") if isinstance(payload, dict) else None
