@@ -10,7 +10,8 @@ from aiopelletstove import (
 from homeassistant import config_entries, data_entry_flow
 
 
-async def test_user_flow_normalizes_host(hass, mock_stove):
+async def test_user_flow_normalizes_host(hass, mock_stove, aioclient_mock):
+    aioclient_mock.get("http://stove.example/api/id", status=404)
     with patch(
         "homeassistant.config_entries.ConfigEntries.async_setup", return_value=True
     ):
@@ -25,6 +26,62 @@ async def test_user_flow_normalizes_host(hass, mock_stove):
     assert result["data"] == {"host": "stove.example", "name": "Study stove"}
     assert result["result"].unique_id == "stove.example"
     mock_stove.async_get_state.assert_awaited_once_with(include_diagnostics=False)
+
+
+async def test_same_mac_at_another_host_is_already_configured(
+    hass, mock_stove, aioclient_mock
+):
+    aioclient_mock.get("http://stove.example/api/id", json={"mac": "020000000001"})
+    aioclient_mock.get(
+        "http://new-stove.example/api/id", json={"mac": "02:00:00:00:00:01"}
+    )
+    with patch(
+        "homeassistant.config_entries.ConfigEntries.async_setup", return_value=True
+    ):
+        first = await hass.config_entries.flow.async_init(
+            "pstove",
+            context={"source": config_entries.SOURCE_USER},
+            data={"host": "stove.example"},
+        )
+        await hass.async_block_till_done()
+
+    assert first["result"].unique_id == "02:00:00:00:00:01"
+    second = await hass.config_entries.flow.async_init(
+        "pstove",
+        context={"source": config_entries.SOURCE_USER},
+        data={"host": "new-stove.example"},
+    )
+    assert second["reason"] == "already_configured"
+
+
+@pytest.mark.parametrize("matches", [True, False])
+async def test_reconfigure_requires_the_same_stove(
+    hass, entry, mock_stove, aioclient_mock, reload_entry, matches
+):
+    hass.config_entries.async_update_entry(entry, unique_id="02:00:00:00:00:01")
+    aioclient_mock.get(
+        "http://new-stove.example/api/id",
+        json={"mac": "020000000001" if matches else "020000000002"},
+    )
+    result = await hass.config_entries.flow.async_init(
+        "pstove",
+        context={
+            "source": config_entries.SOURCE_RECONFIGURE,
+            "entry_id": entry.entry_id,
+        },
+    )
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], {"host": "new-stove.example"}
+    )
+    await hass.async_block_till_done()
+
+    assert entry.unique_id == "02:00:00:00:00:01"
+    if matches:
+        assert result["reason"] == "reconfigure_successful"
+        assert entry.data["host"] == "new-stove.example"
+    else:
+        assert result["errors"] == {"base": "unique_id_mismatch"}
+        assert entry.data["host"] == "stove.example"
 
 
 @pytest.mark.parametrize(

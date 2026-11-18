@@ -109,3 +109,29 @@ async def test_failed_diagnostics_attempt_is_throttled(
         mock_stove.async_get_state.assert_awaited_with(include_diagnostics=False)
         assert coordinator.last_update_success
         assert coordinator.data.total_hours == 4660
+
+
+async def test_mac_upgrade_preserves_existing_device_and_entities(
+    hass, aioclient_mock, setup_entry
+):
+    registry = er.async_get(hass)
+    before = {
+        entity.entity_id: entity.device_id
+        for entity in er.async_entries_for_config_entry(registry, setup_entry.entry_id)
+    }
+    assert before
+    assert await hass.config_entries.async_unload(setup_entry.entry_id)
+    hass.config_entries.async_update_entry(setup_entry, minor_version=1)
+    aioclient_mock.get("http://stove.example/api/id", json={"mac": "020000000001"})
+
+    assert await hass.config_entries.async_setup(setup_entry.entry_id)
+    await hass.async_block_till_done()
+
+    assert setup_entry.minor_version == 2
+    assert setup_entry.unique_id == "02:00:00:00:00:01"
+    after = {
+        entity.entity_id: entity.device_id
+        for entity in er.async_entries_for_config_entry(registry, setup_entry.entry_id)
+    }
+    assert after == before
+    assert hass.states.get("climate.pellet_stove_thermostat").state == "heat"

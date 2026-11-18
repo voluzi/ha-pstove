@@ -5,8 +5,35 @@ from homeassistant.const import CONF_HOST
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
-from .const import PLATFORMS, REQUEST_TIMEOUT
+from .const import (
+    CONF_REGISTRY_ID,
+    DOMAIN,
+    ENTRY_MINOR_VERSION,
+    PLATFORMS,
+    REQUEST_TIMEOUT,
+)
 from .coordinator import PstoveConfigEntry, PstoveDataUpdateCoordinator
+from .identity import async_get_stove_mac
+
+
+async def async_migrate_entry(hass: HomeAssistant, entry: PstoveConfigEntry) -> bool:
+    if entry.version != 1:
+        return False
+    if entry.minor_version >= ENTRY_MINOR_VERSION:
+        return True
+
+    mac = await async_get_stove_mac(hass, entry.data[CONF_HOST])
+    if mac and not hass.config_entries.async_entry_for_domain_unique_id(DOMAIN, mac):
+        registry_id = entry.unique_id or entry.entry_id
+        hass.config_entries.async_update_entry(
+            entry,
+            unique_id=mac,
+            data={**entry.data, CONF_REGISTRY_ID: registry_id},
+            minor_version=ENTRY_MINOR_VERSION,
+        )
+    else:
+        hass.config_entries.async_update_entry(entry, minor_version=ENTRY_MINOR_VERSION)
+    return True
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: PstoveConfigEntry) -> bool:

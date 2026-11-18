@@ -9,15 +9,24 @@
           "host": "Host",
           "name": "Name"
         }
+      },
+      "reconfigure": {
+        "title": "Update the stove address",
+        "description": "Enter the hostname or address of the same stove.",
+        "data": {
+          "host": "Host"
+        }
       }
     },
     "error": {
       "cannot_connect": "Unable to connect to the stove.",
       "unknown": "The stove returned an unexpected response.",
-      "invalid_host": "Enter a hostname or address without a URL scheme or path."
+      "invalid_host": "Enter a hostname or address without a URL scheme or path.",
+      "unique_id_mismatch": "The new address could not be verified as the same stove."
     },
     "abort": {
-      "already_configured": "This stove is already configured."
+      "already_configured": "This stove is already configured.",
+      "reconfigure_successful": "The stove address was updated."
     }
   },
   "options": {

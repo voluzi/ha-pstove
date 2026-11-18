@@ -4,6 +4,8 @@ from homeassistant.const import Platform
 
 DOMAIN = "pstove"
 DEFAULT_NAME = "Pellet Stove"
+ENTRY_MINOR_VERSION = 2
+CONF_REGISTRY_ID = "registry_id"
 CONF_SCAN_INTERVAL = "scan_interval"
 DEFAULT_SCAN_INTERVAL = 10
 MIN_SCAN_INTERVAL = 10

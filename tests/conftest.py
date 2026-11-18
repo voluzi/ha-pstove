@@ -56,6 +56,7 @@ def entry(hass):
         domain=DOMAIN,
         title="Pellet Stove",
         unique_id="stove.example",
+        minor_version=2,
         data={"host": "stove.example", "name": "Pellet Stove"},
     )
     entry.add_to_hass(hass)
