@@ -14,7 +14,8 @@ All notable changes to this project are documented here. The format follows
   within 3 minutes.
 - Send at most one power toggle at a time: ignore a repeated power command and
   reject a conflicting one while a change is pending, including across reloads.
-- Reject power on during final cleaning with an explanatory error.
+- Send no power toggle during final cleaning, standby, an alarm, or an unknown
+  state, and explain why. Requires aiopelletstove 1.1.0.
 
 ## [1.0.0]
 
