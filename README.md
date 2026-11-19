@@ -109,11 +109,15 @@ state.
 
 The stove acknowledges a power command at once but reports the new power state
 only when its start or shutdown sequence begins, often a minute or more later.
-Until then the thermostat shows the requested mode (`preheating` while starting).
-A second power command is ignored if it matches the pending one and rejected if
-it does not. If the stove does not report the change within 3 minutes, the
-thermostat returns to the reported state and a persistent notification is
-created.
+Until then the thermostat shows the requested mode (`preheating` while starting)
+and reads the power state every 10 seconds. A start is confirmed by any
+starting, running, or standby state; a shutdown by final cleaning or off.
+
+Because the power command is a toggle, only one can be in flight: a repeated
+command is ignored and a conflicting one is rejected until the stove confirms
+the first, including across integration reloads. If the stove reports an
+alarm, or does not report the change within 3 minutes, the thermostat returns
+to the reported state and a persistent notification is created.
 
 ## Diagnostics and troubleshooting
 

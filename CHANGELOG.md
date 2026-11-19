@@ -9,10 +9,11 @@ All notable changes to this project are documented here. The format follows
 ### Changed
 
 - Show the requested on or off mode right after a power command, until the
-  stove reports the change. Notify if the stove does not confirm within
-  3 minutes.
-- Ignore a repeated power command and reject a conflicting one while a power
-  change is pending.
+  stove reports the change. Read the power state every 10 seconds while a
+  command is pending, and notify on an alarm or if the stove does not confirm
+  within 3 minutes.
+- Send at most one power toggle at a time: ignore a repeated power command and
+  reject a conflicting one while a change is pending, including across reloads.
 - Reject power on during final cleaning with an explanatory error.
 
 ## [1.0.0]

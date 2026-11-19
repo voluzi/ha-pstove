@@ -1,7 +1,11 @@
 """Pellet stove thermostat with five power presets."""
 
+import asyncio
 import logging
 from collections.abc import Callable
+from dataclasses import dataclass, field
+from datetime import datetime, timedelta
+from time import monotonic
 from typing import TYPE_CHECKING, Any
 
 from aiopelletstove import PelletStoveError, PowerState
@@ -17,15 +21,55 @@ from homeassistant.const import ATTR_TEMPERATURE, UnitOfTemperature
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
-from homeassistant.helpers.event import async_call_later
+from homeassistant.helpers.event import async_track_time_interval
 
-from .const import DOMAIN, POWER_CONFIRM_TIMEOUT
+from .const import DOMAIN, POWER_CONFIRM_POLL_INTERVAL, POWER_CONFIRM_TIMEOUT
 from .coordinator import PstoveConfigEntry
 from .entity import PstoveEntity
 
 PRESETS = [f"Level {level}" for level in range(1, 6)]
 
 _LOGGER = logging.getLogger(__name__)
+
+# States that show the stove accepted a power command. Standby means the stove
+# is switched on and waiting for the room to cool.
+_CONFIRMS_ON = frozenset(
+    {
+        PowerState.AWAITING_FLAME_1,
+        PowerState.AWAITING_FLAME_2,
+        PowerState.LIGHTING,
+        PowerState.RUNNING,
+        PowerState.ASHPAN_CLEANING,
+        PowerState.STANDBY,
+    }
+)
+_CONFIRMS_OFF = frozenset({PowerState.OFF, PowerState.FINAL_CLEANING})
+_ALARMS = frozenset({PowerState.ALARM, PowerState.ALARM_MEMORY})
+
+
+@dataclass
+class PendingPower:
+    on: bool
+    deadline: float
+
+
+@dataclass
+class PowerTracker:
+    """Per-entry power command state that survives entity reloads.
+
+    The stove acknowledges a power toggle at once but reports the new power
+    state only when its start or shutdown sequence begins, often a minute or
+    more later. A second toggle in that window cancels the first, so only one
+    command may be in flight.
+    """
+
+    lock: asyncio.Lock = field(default_factory=asyncio.Lock)
+    pending: PendingPower | None = None
+
+
+def _power_tracker(hass: HomeAssistant, entry: PstoveConfigEntry) -> PowerTracker:
+    trackers: dict[str, PowerTracker] = hass.data.setdefault(DOMAIN, {})
+    return trackers.setdefault(entry.entry_id, PowerTracker())
 
 
 async def async_setup_entry(
@@ -53,61 +97,114 @@ class PstoveClimate(PstoveEntity, ClimateEntity):
 
     def __init__(self, entry: PstoveConfigEntry) -> None:
         super().__init__(entry, "thermostat", "Thermostat")
-        # The stove acknowledges a power toggle at once but only reports the
-        # new power state when its start or shutdown sequence begins, often a
-        # minute or more later. Until then the requested mode is shown.
-        self._pending_on: bool | None = None
-        self._cancel_pending: Callable[[], None] | None = None
+        self._entry = entry
+        self._tracker: PowerTracker | None = None
+        self._cancel_poll: Callable[[], None] | None = None
+        self._polling = False
+        self._attached = False
 
     @property
-    def _stove_name(self) -> str:
-        entry = self.coordinator.config_entry
-        return entry.title if entry is not None else "Pellet stove"
+    def _power(self) -> PowerTracker:
+        assert self._tracker is not None
+        return self._tracker
+
+    @property
+    def _pending(self) -> PendingPower | None:
+        return self._tracker.pending if self._tracker is not None else None
 
     @property
     def _notification_id(self) -> str:
-        return f"{DOMAIN}_{self.unique_id}_power_unconfirmed"
+        return f"{DOMAIN}_{self._entry.entry_id}_power"
 
-    def _clear_pending(self) -> None:
-        self._pending_on = None
-        if self._cancel_pending is not None:
-            self._cancel_pending()
-            self._cancel_pending = None
+    async def async_added_to_hass(self) -> None:
+        await super().async_added_to_hass()
+        self._tracker = _power_tracker(self.hass, self._entry)
+        self._attached = True
+        self.async_on_remove(self._detach)
+        # A command started by the previous entity may still hold the lock.
+        self.hass.async_create_task(self._async_resume_pending())
+
+    async def _async_resume_pending(self) -> None:
+        async with self._power.lock:
+            pass
+        if self._attached and self._power.pending is not None:
+            self._start_power_poll()
+            self.async_write_ha_state()
 
     @callback
-    def _handle_coordinator_update(self) -> None:
-        if (
-            self._pending_on is not None
-            and self.coordinator.data.power_state.is_on == self._pending_on
-        ):
-            self._clear_pending()
+    def _detach(self) -> None:
+        self._attached = False
+        self._stop_power_poll()
+
+    def _start_power_poll(self) -> None:
+        if self._cancel_poll is None:
+            self._cancel_poll = async_track_time_interval(
+                self.hass,
+                self._async_poll_power,
+                timedelta(seconds=POWER_CONFIRM_POLL_INTERVAL),
+            )
+
+    def _stop_power_poll(self) -> None:
+        if self._cancel_poll is not None:
+            self._cancel_poll()
+            self._cancel_poll = None
+
+    async def _async_poll_power(self, _now: datetime | None = None) -> None:
+        pending = self._power.pending
+        if pending is None:
+            self._stop_power_poll()
+            return
+        if self._polling:
+            return
+        self._polling = True
+        try:
+            state: PowerState | None = PowerState(
+                int(await self.coordinator.client.async_read(POWER_STATE))
+            )
+        except PelletStoveError:
+            state = None
+        finally:
+            self._polling = False
+        if self._power.pending is not pending:
+            return
+        requested = "on" if pending.on else "off"
+        if state in _ALARMS:
+            self._finish_power(
+                f"The stove reported an alarm after the power {requested} command. "
+                "Check the stove."
+            )
+        elif state in (_CONFIRMS_ON if pending.on else _CONFIRMS_OFF):
+            self._finish_power(None)
+        elif monotonic() >= pending.deadline:
+            detail = (
+                "did not report the change"
+                if state is not None
+                else "could not be read to confirm the change"
+            )
+            self._finish_power(
+                f"The stove acknowledged the power {requested} command but "
+                f"{detail} within {POWER_CONFIRM_TIMEOUT // 60} minutes. "
+                "Check the stove."
+            )
+
+    @callback
+    def _finish_power(self, problem: str | None) -> None:
+        self._power.pending = None
+        self._stop_power_poll()
+        if not self._attached:
+            return
+        if problem is None:
             persistent_notification.async_dismiss(self.hass, self._notification_id)
-        super()._handle_coordinator_update()
-
-    @callback
-    def _pending_timed_out(self, _now: object) -> None:
-        self._cancel_pending = None
-        requested = "on" if self._pending_on else "off"
-        self._pending_on = None
-        _LOGGER.warning(
-            "%s did not confirm power %s within %s seconds",
-            self.entity_id,
-            requested,
-            POWER_CONFIRM_TIMEOUT,
-        )
-        persistent_notification.async_create(
-            self.hass,
-            f"The pellet stove acknowledged the power {requested} command but "
-            f"did not report the change within {POWER_CONFIRM_TIMEOUT // 60} "
-            "minutes. Check the stove.",
-            title=f"{self._stove_name}: power {requested} not confirmed",
-            notification_id=self._notification_id,
-        )
+        else:
+            _LOGGER.warning("%s: %s", self.entity_id, problem)
+            persistent_notification.async_create(
+                self.hass,
+                problem,
+                title=f"{self._entry.title}: power command not confirmed",
+                notification_id=self._notification_id,
+            )
         self.async_write_ha_state()
-
-    async def async_will_remove_from_hass(self) -> None:
-        self._clear_pending()
-        await super().async_will_remove_from_hass()
+        self.hass.async_create_task(self.coordinator.async_request_refresh())
 
     @property
     def native_current_temperature(self) -> float:
@@ -120,16 +217,14 @@ class PstoveClimate(PstoveEntity, ClimateEntity):
     @property
     def hvac_mode(self) -> HVACMode:
         on = self.coordinator.data.power_state.is_on
-        if self._pending_on is not None:
-            on = self._pending_on
+        if (pending := self._pending) is not None:
+            on = pending.on
         return HVACMode.HEAT if on else HVACMode.OFF
 
     @property
     def hvac_action(self) -> HVACAction:
-        if self._pending_on is True:
-            return HVACAction.PREHEATING
-        if self._pending_on is False:
-            return HVACAction.OFF
+        if (pending := self._pending) is not None:
+            return HVACAction.PREHEATING if pending.on else HVACAction.OFF
         state = self.coordinator.data
         if not state.power_state.is_on:
             return HVACAction.OFF
@@ -150,43 +245,44 @@ class PstoveClimate(PstoveEntity, ClimateEntity):
         if hvac_mode not in self._attr_hvac_modes:
             raise ServiceValidationError("Unsupported HVAC mode")
         on = hvac_mode == HVACMode.HEAT
-        if self._pending_on is not None:
-            # The stove still reports the old state, so a second toggle would
-            # cancel the first one instead of being ignored.
-            if self._pending_on == on:
-                return
-            raise ServiceValidationError(
-                translation_domain=DOMAIN,
-                translation_key="power_change_pending",
-            )
         client = self.coordinator.client
-        try:
-            current = PowerState(int(await client.async_read(POWER_STATE)))
-        except PelletStoveError as err:
-            raise HomeAssistantError("Pellet stove command failed") from err
-        if on and current == PowerState.FINAL_CLEANING:
-            raise ServiceValidationError(
-                translation_domain=DOMAIN,
-                translation_key="final_cleaning",
-            )
-        if not current.is_known:
-            raise HomeAssistantError(
-                translation_domain=DOMAIN,
-                translation_key="unknown_power_state",
-                translation_placeholders={"state": str(current.value)},
-            )
-        if current.is_on == on:
+        async with self._power.lock:
+            if (pending := self._power.pending) is not None:
+                if pending.on == on:
+                    return
+                raise ServiceValidationError(
+                    translation_domain=DOMAIN,
+                    translation_key="power_change_pending",
+                )
+            try:
+                current = PowerState(int(await client.async_read(POWER_STATE)))
+                if on and current == PowerState.FINAL_CLEANING:
+                    raise ServiceValidationError(
+                        translation_domain=DOMAIN,
+                        translation_key="final_cleaning",
+                    )
+                if not current.is_known:
+                    raise HomeAssistantError(
+                        translation_domain=DOMAIN,
+                        translation_key="unknown_power_state",
+                        translation_placeholders={"state": str(current.value)},
+                    )
+                toggle = current.is_on != on
+                if toggle:
+                    await client.async_toggle_power()
+            except PelletStoveError as err:
+                raise HomeAssistantError("Pellet stove command failed") from err
+            if toggle:
+                self._power.pending = PendingPower(
+                    on, monotonic() + POWER_CONFIRM_TIMEOUT
+                )
+        if not toggle:
             await self.coordinator.async_request_refresh()
             return
-        await self.async_command(client.async_set_power(on))
-        if self.coordinator.data.power_state.is_on == on:
-            return
-        self._pending_on = on
-        self._cancel_pending = async_call_later(
-            self.hass, POWER_CONFIRM_TIMEOUT, self._pending_timed_out
-        )
         persistent_notification.async_dismiss(self.hass, self._notification_id)
-        self.async_write_ha_state()
+        if self._attached:
+            self._start_power_poll()
+            self.async_write_ha_state()
 
     async def async_turn_on(self) -> None:
         await self.async_set_hvac_mode(HVACMode.HEAT)
