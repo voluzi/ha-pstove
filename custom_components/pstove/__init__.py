@@ -62,3 +62,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: PstoveConfigEntry) -> b
         await entry.runtime_data.client.async_close()
         return True
     return False
+
+
+async def async_remove_entry(hass: HomeAssistant, entry: PstoveConfigEntry) -> None:
+    hass.data.get(DOMAIN, {}).pop(entry.entry_id, None)

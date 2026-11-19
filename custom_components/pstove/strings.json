@@ -43,6 +43,24 @@
   "exceptions": {
     "whole_temperature_required": {
       "message": "Target temperature must be a whole number of degrees Celsius."
+    },
+    "final_cleaning": {
+      "message": "The stove is finishing its cleaning cycle. Turn it on again after it switches off."
+    },
+    "unknown_power_state": {
+      "message": "The stove reported an unknown power state ({state}). The command was not sent."
+    },
+    "power_change_pending": {
+      "message": "The stove has not confirmed the previous power command yet. Try again once it reports the new state."
+    },
+    "standby": {
+      "message": "The stove is in standby. Use the stove controls to switch it on or off."
+    },
+    "alarm": {
+      "message": "The stove reports an alarm. Clear it on the stove before using power commands."
+    },
+    "power_unacknowledged": {
+      "message": "The stove did not answer the power command. It may still act on it; its power state is being checked."
     }
   }
 }
