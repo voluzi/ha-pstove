@@ -103,8 +103,17 @@ actions. Target the thermostat with `climate.turn_on`, `climate.turn_off`,
 `climate.set_preset_mode` (for example, `Level 3`). Use `switch.turn_on` and
 `switch.turn_off` for preferences, and `select.select_option` for fan regulation.
 
-The integration checks the power state before toggling; it does not toggle
-during final cleaning or when the stove reports an unknown state.
+The integration checks the power state before toggling; it rejects power on
+during final cleaning and any power command when the stove reports an unknown
+state.
+
+The stove acknowledges a power command at once but reports the new power state
+only when its start or shutdown sequence begins, often a minute or more later.
+Until then the thermostat shows the requested mode (`preheating` while starting).
+A second power command is ignored if it matches the pending one and rejected if
+it does not. If the stove does not report the change within 3 minutes, the
+thermostat returns to the reported state and a persistent notification is
+created.
 
 ## Diagnostics and troubleshooting
 
