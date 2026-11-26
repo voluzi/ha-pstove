@@ -25,6 +25,7 @@ from homeassistant.helpers.dispatcher import (
 )
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.event import async_call_later, async_track_state_change_event
+from homeassistant.util.unit_conversion import PowerConverter
 
 from .const import (
     CONF_POWER_SENSOR,
@@ -62,13 +63,13 @@ async def async_setup_entry(
 
 
 def _watts(state: State | None) -> float | None:
-    if (
-        state is None
-        or state.attributes.get(ATTR_UNIT_OF_MEASUREMENT) != UnitOfPower.WATT
-    ):
+    if state is None:
+        return None
+    unit = state.attributes.get(ATTR_UNIT_OF_MEASUREMENT)
+    if not isinstance(unit, str) or unit not in PowerConverter.VALID_UNITS:
         return None
     try:
-        watts = float(state.state)
+        watts = PowerConverter.convert(float(state.state), unit, UnitOfPower.WATT)
     except ValueError:
         return None
     return watts if isfinite(watts) else None

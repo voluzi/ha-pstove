@@ -39,7 +39,7 @@
           "power_threshold": "Active power threshold"
         },
         "data_description": {
-          "power_sensor": "Optional. Select a smart plug power sensor that reports in watts. Clear the selection to turn off mismatch detection.",
+          "power_sensor": "Optional. Select the smart plug power sensor for the stove. Readings are converted to watts. Clear the selection to turn off mismatch detection.",
           "power_threshold": "The power draw that suggests the stove is active. Defaults to 30 W."
         },
         "description": "Common status and preferences are polled every 10\u2013300 seconds. Diagnostics are fetched at most every 300 seconds."
@@ -59,7 +59,7 @@
   "issues": {
     "board_state_mismatch": {
       "title": "{stove}: Wi-Fi board may be reporting a stale state",
-      "description": "The stove state and the external power reading have disagreed for several minutes. Check the stove's display and make sure the selected power sensor measures the stove in watts. This repair clears automatically when the readings agree again."
+      "description": "The stove state and the external power reading have disagreed for several minutes. Check the stove's display and make sure the selected power sensor measures the stove. This repair clears automatically when the readings agree again."
     }
   },
   "exceptions": {

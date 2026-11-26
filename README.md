@@ -74,9 +74,10 @@ Under **Configure**, the polling interval defaults to 10 seconds and accepts
 the last successful values remain visible between reads.
 
 To detect when the Wi-Fi board may be reporting a stale state, optionally
-select an external power sensor in watts under **Configure**. Use the power
-reading from the smart plug feeding the stove. Home Assistant raises a repair
-and turns on **Board state mismatch** when either condition holds continuously:
+select an external power sensor under **Configure**. Use the smart plug feeding
+the stove. The detector converts supported units, such as kW, to watts. Home
+Assistant raises a repair and turns on **Board state mismatch** when either
+condition holds continuously:
 
 - The plug draws at least the configured threshold (30 W by default) for
   5 minutes while the board reports off, awaiting flame, standby, or an alarm.

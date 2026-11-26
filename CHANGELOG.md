@@ -18,6 +18,8 @@ All notable changes to this project are documented here. The format follows
   toggle or a failed read before dispatch does not delay another attempt.
 - Keep guarding power toggles after a confirmation timeout. Reloading the
   integration resets the guard for manual recovery.
+- Convert external power readings from supported units to watts before
+  checking for a board state mismatch.
 - Show standby as heat mode with an idle action, and keep a direct power
   confirmation visible until a newer poll arrives.
 

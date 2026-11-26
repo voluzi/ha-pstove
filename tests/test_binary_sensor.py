@@ -27,8 +27,8 @@ async def _setup(hass, entry, mock_stove, stove_state, reported, **options):
     await hass.async_block_till_done()
 
 
-async def _power(hass, watts):
-    hass.states.async_set(PLUG, watts, {ATTR_UNIT_OF_MEASUREMENT: UnitOfPower.WATT})
+async def _power(hass, value, unit=UnitOfPower.WATT):
+    hass.states.async_set(PLUG, value, {ATTR_UNIT_OF_MEASUREMENT: unit})
     await hass.async_block_till_done()
 
 
@@ -45,13 +45,22 @@ def _issue(issue_registry, entry):
 
 
 @pytest.mark.parametrize(
-    "reported,options,normal,mismatch,seconds",
+    "reported,options,normal,mismatch,unit,seconds",
     [
-        (PowerState.OFF, {}, "29.9", "30", 300),
-        (PowerState.AWAITING_FLAME_1, {"power_threshold": 45}, "44.9", "45", 300),
-        (PowerState.AWAITING_FLAME_2, {}, "29.9", "30", 300),
-        (PowerState.RUNNING, {}, "10", "9.9", 600),
-        (PowerState.FINAL_CLEANING, {}, "10", "9.9", 600),
+        (PowerState.OFF, {}, "29.9", "30", UnitOfPower.WATT, 300),
+        (
+            PowerState.AWAITING_FLAME_1,
+            {"power_threshold": 45},
+            "44.9",
+            "45",
+            UnitOfPower.WATT,
+            300,
+        ),
+        (PowerState.AWAITING_FLAME_2, {}, "29.9", "30", UnitOfPower.WATT, 300),
+        (PowerState.RUNNING, {}, "10", "9.9", UnitOfPower.WATT, 600),
+        (PowerState.FINAL_CLEANING, {}, "10", "9.9", UnitOfPower.WATT, 600),
+        (PowerState.OFF, {}, "0.0299", "0.03", UnitOfPower.KILO_WATT, 300),
+        (PowerState.RUNNING, {}, "0.01", "0.009", UnitOfPower.KILO_WATT, 600),
     ],
 )
 async def test_board_mismatch_requires_continuous_disagreement(
@@ -65,15 +74,16 @@ async def test_board_mismatch_requires_continuous_disagreement(
     options,
     normal,
     mismatch,
+    unit,
     seconds,
 ):
-    await _power(hass, normal)
+    await _power(hass, normal, unit)
     await _setup(hass, entry, mock_stove, stove_state, reported, **options)
     await _advance(hass, freezer, seconds)
     assert hass.states.get(MISMATCH).state == "off"
     assert _issue(issue_registry, entry) is None
 
-    await _power(hass, mismatch)
+    await _power(hass, mismatch, unit)
     await _advance(hass, freezer, seconds - 1)
     assert hass.states.get(MISMATCH).state == "off"
     assert _issue(issue_registry, entry) is None
@@ -81,21 +91,31 @@ async def test_board_mismatch_requires_continuous_disagreement(
     assert hass.states.get(MISMATCH).state == "on"
     assert _issue(issue_registry, entry).translation_key == "board_state_mismatch"
 
-    await _power(hass, normal)
+    await _power(hass, normal, unit)
     assert hass.states.get(MISMATCH).state == "off"
     assert _issue(issue_registry, entry) is None
     mock_stove.async_set_power.assert_not_awaited()
     mock_stove.async_write.assert_not_awaited()
 
 
-@pytest.mark.parametrize("invalid", ["unknown", "unavailable", "bad", "nan", "inf"])
+@pytest.mark.parametrize(
+    "invalid,unit",
+    [
+        ("unknown", UnitOfPower.WATT),
+        ("unavailable", UnitOfPower.WATT),
+        ("bad", UnitOfPower.WATT),
+        ("nan", UnitOfPower.WATT),
+        ("inf", UnitOfPower.WATT),
+        ("60", "kWh"),
+    ],
+)
 async def test_invalid_plug_reading_breaks_continuity(
-    hass, entry, mock_stove, stove_state, freezer, issue_registry, invalid
+    hass, entry, mock_stove, stove_state, freezer, issue_registry, invalid, unit
 ):
     await _power(hass, "60")
     await _setup(hass, entry, mock_stove, stove_state, PowerState.OFF)
     await _advance(hass, freezer, 299)
-    await _power(hass, invalid)
+    await _power(hass, invalid, unit)
     await _advance(hass, freezer, 301)
     assert hass.states.get(MISMATCH).state == "unavailable"
     assert _issue(issue_registry, entry) is None
@@ -106,7 +126,7 @@ async def test_invalid_plug_reading_breaks_continuity(
     await _advance(hass, freezer, 1)
     assert hass.states.get(MISMATCH).state == "on"
 
-    await _power(hass, invalid)
+    await _power(hass, invalid, unit)
     assert hass.states.get(MISMATCH).state == "unavailable"
     assert _issue(issue_registry, entry) is None
 
