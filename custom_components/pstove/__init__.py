@@ -59,6 +59,10 @@ async def _async_options_updated(hass: HomeAssistant, entry: PstoveConfigEntry) 
 
 async def async_unload_entry(hass: HomeAssistant, entry: PstoveConfigEntry) -> bool:
     if await hass.config_entries.async_unload_platforms(entry, PLATFORMS):
+        tracker = hass.data.get(DOMAIN, {}).pop(entry.entry_id, None)
+        if tracker is not None:
+            async with tracker.lock:
+                pass
         await entry.runtime_data.client.async_close()
         return True
     return False

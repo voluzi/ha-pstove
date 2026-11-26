@@ -129,13 +129,16 @@ Until then the thermostat shows the requested mode (`preheating` while starting)
 and reads the power state every 10 seconds. A start is confirmed by any
 starting, running, or standby state; a shutdown by final cleaning or off.
 
-Because the power command is a toggle, only one can be in flight: a repeated
-command is ignored and a conflicting one is rejected until the stove confirms
-the first, including across integration reloads. If the stove does not answer
-a power command, the action fails but the same guard applies until polling
-shows what the stove did. If the stove reports an alarm, or does not report the
-change within 3 minutes, the thermostat returns to the reported state and a
-persistent notification is created.
+Because the power command is a toggle, a repeated command is ignored and a
+conflicting one is rejected while the outcome is uncertain, even if the stove
+did not acknowledge the command. The guard clears when the board reports the
+requested state, an alarm, or a change from the state before the command. If
+the reply was lost, two different direct readings can establish a change.
+
+If the board reports an alarm or the command is still unconfirmed after
+3 minutes, the thermostat returns to the reported state and raises a persistent
+notification. After a timeout, it keeps polling and guarding the toggle.
+To reset the guard manually, check the stove first, then reload the integration.
 
 ## Diagnostics and troubleshooting
 

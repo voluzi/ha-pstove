@@ -16,6 +16,8 @@ All notable changes to this project are documented here. The format follows
 
 - Keep checking the stove after a lost toggle acknowledgement. A rejected
   toggle or a failed read before dispatch does not delay another attempt.
+- Keep guarding power toggles after a confirmation timeout. Reloading the
+  integration resets the guard for manual recovery.
 - Show standby as heat mode with an idle action, and keep a direct power
   confirmation visible until a newer poll arrives.
 
