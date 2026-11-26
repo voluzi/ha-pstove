@@ -25,3 +25,7 @@ PLATFORMS = [
     Platform.SENSOR,
     Platform.SWITCH,
 ]
+
+
+def power_notification_id(entry_id: str) -> str:
+    return f"{DOMAIN}_{entry_id}_power"

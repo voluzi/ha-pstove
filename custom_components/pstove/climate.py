@@ -29,7 +29,12 @@ from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.event import async_track_time_interval
 
-from .const import DOMAIN, POWER_CONFIRM_POLL_INTERVAL, POWER_CONFIRM_TIMEOUT
+from .const import (
+    DOMAIN,
+    POWER_CONFIRM_POLL_INTERVAL,
+    POWER_CONFIRM_TIMEOUT,
+    power_notification_id,
+)
 from .coordinator import PstoveConfigEntry
 from .entity import PstoveEntity
 
@@ -138,7 +143,7 @@ class PstoveClimate(PstoveEntity, ClimateEntity):
 
     @property
     def _notification_id(self) -> str:
-        return f"{DOMAIN}_{self._entry.entry_id}_power"
+        return power_notification_id(self._entry.entry_id)
 
     async def async_added_to_hass(self) -> None:
         await super().async_added_to_hass()

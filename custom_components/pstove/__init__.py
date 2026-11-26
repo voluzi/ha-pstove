@@ -1,6 +1,7 @@
 """Native local polling integration for pellet stoves."""
 
 from aiopelletstove import PelletStove
+from homeassistant.components import persistent_notification
 from homeassistant.const import CONF_HOST
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
@@ -11,6 +12,7 @@ from .const import (
     ENTRY_MINOR_VERSION,
     PLATFORMS,
     REQUEST_TIMEOUT,
+    power_notification_id,
 )
 from .coordinator import PstoveConfigEntry, PstoveDataUpdateCoordinator
 from .identity import StoveIdentityUnavailableError, async_get_stove_mac
@@ -70,3 +72,4 @@ async def async_unload_entry(hass: HomeAssistant, entry: PstoveConfigEntry) -> b
 
 async def async_remove_entry(hass: HomeAssistant, entry: PstoveConfigEntry) -> None:
     hass.data.get(DOMAIN, {}).pop(entry.entry_id, None)
+    persistent_notification.async_dismiss(hass, power_notification_id(entry.entry_id))
