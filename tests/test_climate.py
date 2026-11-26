@@ -6,6 +6,8 @@ from importlib.util import find_spec
 import pytest
 from aiopelletstove import (
     PelletStoveConnectionError,
+    PelletStovePowerOutcomeUnknownError,
+    PelletStoveRejectedError,
     PelletStoveResponseError,
     PowerCommandOutcome,
     PowerResult,
@@ -65,6 +67,9 @@ async def test_climate_controls(hass, setup_entry, mock_stove, stove_state):
         )
         mock_stove.async_set_power.assert_awaited_with(on)
         mock_stove.async_read.return_value = int(reported)
+        mock_stove.async_get_state.return_value = replace(
+            stove_state, power_state=reported
+        )
         await _poll(hass)
         mock_stove.async_read.assert_awaited_with(POWER_STATE)
         assert hass.states.get(entity_id).state == ("heat" if on else "off")
@@ -77,7 +82,7 @@ async def test_climate_controls(hass, setup_entry, mock_stove, stove_state):
         (PowerState.LIGHTING, 0, "heat", "heating"),
         (PowerState.ASHPAN_CLEANING, 1, "heat", "heating"),
         (PowerState.FINAL_CLEANING, 0, "off", "off"),
-        (PowerState.STANDBY, 0, "off", "off"),
+        (PowerState.STANDBY, 0, "heat", "idle"),
         (PowerState.OFF, 0, "off", "off"),
     ],
 )
@@ -166,15 +171,63 @@ async def test_turn_on_shows_requested_mode_until_confirmed(
     assert not _notifications(hass)
 
 
-async def test_confirmation_publishes_fresh_state(
-    hass, setup_entry, mock_stove, freezer
+async def test_confirmation_outranks_an_older_full_poll(
+    hass, setup_entry, mock_stove, stove_state, freezer
 ):
-    # The coordinator still caches RUNNING; the confirming read must win.
     mock_stove.async_set_power.return_value = TOGGLED_FROM_RUNNING
     await _turn(hass, "turn_off")
-    mock_stove.async_read.return_value = int(PowerState.FINAL_CLEANING)
-    await _tick(hass, freezer)
+
+    # A full poll samples RUNNING, then finishes after the confirming read.
+    release = asyncio.Event()
+    started = asyncio.Event()
+    read_finished = asyncio.Event()
+    polled = replace(stove_state, air_temperature=22)
+
+    async def slow_state(**_kwargs):
+        started.set()
+        await release.wait()
+        return polled
+
+    async def read_power(_register):
+        read_finished.set()
+        return int(PowerState.FINAL_CLEANING)
+
+    mock_stove.async_get_state.side_effect = slow_state
+    old_poll = hass.async_create_task(setup_entry.runtime_data.async_request_refresh())
+    await started.wait()
+
+    try:
+        mock_stove.async_read.side_effect = read_power
+        freezer.tick(POWER_CONFIRM_POLL_INTERVAL + 1)
+        async_fire_time_changed(hass, dt_util.utcnow())
+        await read_finished.wait()
+        assert _mode(hass) == ("off", "off")
+    finally:
+        release.set()
+        await old_poll
+    await hass.async_block_till_done()
     assert _mode(hass) == ("off", "off")
+
+    # Even an identical full sample takes over if it was read more recently.
+    mock_stove.async_get_state.side_effect = None
+    mock_stove.async_get_state.return_value = polled
+    await setup_entry.runtime_data.async_refresh()
+    await hass.async_block_till_done()
+    assert _mode(hass) == ("heat", "heating")
+
+
+async def test_start_into_standby_shows_armed(
+    hass, setup_entry, mock_stove, stove_state, freezer
+):
+    mock_stove.async_set_power.return_value = TOGGLED_FROM_OFF
+    await _turn(hass, "turn_on")
+    mock_stove.async_read.return_value = int(PowerState.STANDBY)
+    mock_stove.async_get_state.return_value = replace(
+        stove_state, power_state=PowerState.STANDBY
+    )
+    await _tick(hass, freezer)
+    assert _mode(hass) == ("heat", "idle")
+    assert not _notifications(hass)
 
 
 async def test_unconfirmed_power_on_reverts_and_notifies(
@@ -197,11 +250,15 @@ async def test_unconfirmed_power_on_reverts_and_notifies(
     assert not _notifications(hass)
 
 
-async def test_alarm_ends_pending_power_on(hass, setup_entry, mock_stove, freezer):
-    # The coordinator still caches RUNNING; the alarm read must win.
+async def test_alarm_ends_pending_power_on(
+    hass, setup_entry, mock_stove, stove_state, freezer
+):
     mock_stove.async_set_power.return_value = TOGGLED_FROM_OFF
     await _turn(hass, "turn_on")
     mock_stove.async_read.return_value = int(PowerState.ALARM)
+    mock_stove.async_get_state.return_value = replace(
+        stove_state, power_state=PowerState.ALARM
+    )
     await _tick(hass, freezer)
     assert _mode(hass) == ("off", "off")
     assert len(_notifications(hass)) == 1
@@ -236,7 +293,7 @@ async def test_lost_acknowledgement_still_blocks_a_second_toggle(
         stove_state, power_state=PowerState.OFF
     )
     await setup_entry.runtime_data.async_refresh()
-    mock_stove.async_set_power.side_effect = PelletStoveConnectionError
+    mock_stove.async_set_power.side_effect = PelletStovePowerOutcomeUnknownError
     mock_stove.async_read.return_value = int(PowerState.OFF)
     with pytest.raises(HomeAssistantError) as error:
         await _turn(hass, "turn_on")
@@ -247,8 +304,43 @@ async def test_lost_acknowledgement_still_blocks_a_second_toggle(
     mock_stove.async_set_power.assert_awaited_once()
 
     mock_stove.async_read.return_value = int(PowerState.LIGHTING)
+    mock_stove.async_get_state.return_value = replace(
+        stove_state, power_state=PowerState.LIGHTING
+    )
     await _tick(hass, freezer)
     assert _mode(hass) == ("heat", "heating")
+    assert not _notifications(hass)
+
+
+@pytest.mark.parametrize(
+    "failure,key",
+    [(PelletStoveConnectionError, None), (PelletStoveRejectedError, "power_rejected")],
+)
+async def test_known_power_failure_leaves_no_guard(
+    hass, setup_entry, mock_stove, failure, key
+):
+    mock_stove.async_set_power.side_effect = failure
+    with pytest.raises(HomeAssistantError) as error:
+        await _turn(hass, "turn_off")
+    assert error.value.translation_key == key
+    mock_stove.async_set_power.side_effect = None
+    mock_stove.async_set_power.return_value = TOGGLED_FROM_RUNNING
+    await _turn(hass, "turn_off")
+    assert mock_stove.async_set_power.await_count == 2
+
+
+async def test_confirmation_window_starts_at_acknowledgement(
+    hass, setup_entry, mock_stove, freezer
+):
+    async def slow_set_power(_on):
+        freezer.tick(POWER_CONFIRM_TIMEOUT)
+        return TOGGLED_FROM_OFF
+
+    mock_stove.async_set_power.side_effect = slow_set_power
+    mock_stove.async_read.return_value = int(PowerState.OFF)
+    await _turn(hass, "turn_on")
+    await _tick(hass, freezer)
+    assert _mode(hass) == ("heat", "preheating")
     assert not _notifications(hass)
 
 

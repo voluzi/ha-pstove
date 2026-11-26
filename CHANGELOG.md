@@ -4,6 +4,21 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and this project uses
 [Semantic Versioning](https://semver.org/).
 
+## [1.1.0]
+
+### Added
+
+- Optionally compare the board's reported state with a smart plug's measured
+  power. A sustained mismatch creates a repair and turns on the Board state
+  mismatch diagnostic.
+
+### Fixed
+
+- Keep checking the stove after a lost toggle acknowledgement. A rejected
+  toggle or a failed read before dispatch does not delay another attempt.
+- Show standby as heat mode with an idle action, and keep a direct power
+  confirmation visible until a newer poll arrives.
+
 ## [1.0.1]
 
 ### Changed
@@ -30,5 +45,6 @@ All notable changes to this project are documented here. The format follows
 - Use the Wi-Fi module MAC as device identity when the local identity endpoint
   provides it. Update the connection address without replacing existing entities.
 
+[1.1.0]: https://github.com/voluzi/ha-pstove/releases/tag/v1.1.0
 [1.0.1]: https://github.com/voluzi/ha-pstove/releases/tag/v1.0.1
 [1.0.0]: https://github.com/voluzi/ha-pstove/releases/tag/v1.0.0

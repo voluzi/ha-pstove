@@ -1,5 +1,6 @@
 """User setup and polling options."""
 
+from math import isfinite
 from typing import TYPE_CHECKING, Any
 
 from aiopelletstove import (
@@ -8,15 +9,23 @@ from aiopelletstove import (
     PelletStoveError,
     PelletStoveValueError,
 )
+from homeassistant.components.sensor import SensorDeviceClass
 from homeassistant.config_entries import (
     ConfigEntry,
     ConfigFlow,
     ConfigFlowResult,
     OptionsFlow,
 )
-from homeassistant.const import CONF_HOST, CONF_NAME
+from homeassistant.const import CONF_HOST, CONF_NAME, UnitOfPower
 from homeassistant.core import callback
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
+from homeassistant.helpers.selector import (
+    EntitySelector,
+    EntitySelectorConfig,
+    NumberSelector,
+    NumberSelectorConfig,
+    NumberSelectorMode,
+)
 
 if TYPE_CHECKING:
     import probatio as vol
@@ -27,11 +36,15 @@ else:
         import voluptuous as vol
 
 from .const import (
+    CONF_POWER_SENSOR,
+    CONF_POWER_THRESHOLD,
     CONF_SCAN_INTERVAL,
     DEFAULT_NAME,
+    DEFAULT_POWER_THRESHOLD,
     DEFAULT_SCAN_INTERVAL,
     DOMAIN,
     ENTRY_MINOR_VERSION,
+    LOW_POWER_THRESHOLD,
     MAX_SCAN_INTERVAL,
     MIN_SCAN_INTERVAL,
     REQUEST_TIMEOUT,
@@ -141,25 +154,50 @@ class PstoveOptionsFlow(OptionsFlow):
     async def async_step_init(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
+        errors: dict[str, str] = {}
         if user_input is not None:
-            return self.async_create_entry(title="", data=user_input)
+            threshold = user_input.get(CONF_POWER_THRESHOLD, DEFAULT_POWER_THRESHOLD)
+            if isfinite(threshold):
+                return self.async_create_entry(title="", data=user_input)
+            errors[CONF_POWER_THRESHOLD] = "invalid_power_threshold"
         return self.async_show_form(
             step_id="init",
-            data_schema=vol.Schema(
-                {
-                    vol.Required(
-                        CONF_SCAN_INTERVAL,
-                        default=self.config_entry.options.get(
+            data_schema=self.add_suggested_values_to_schema(
+                vol.Schema(
+                    {
+                        vol.Required(
                             CONF_SCAN_INTERVAL,
-                            DEFAULT_SCAN_INTERVAL,
+                            default=self.config_entry.options.get(
+                                CONF_SCAN_INTERVAL,
+                                DEFAULT_SCAN_INTERVAL,
+                            ),
+                        ): vol.All(
+                            vol.Coerce(int),
+                            vol.Range(min=MIN_SCAN_INTERVAL, max=MAX_SCAN_INTERVAL),
                         ),
-                    ): vol.All(
-                        vol.Coerce(int),
-                        vol.Range(
-                            min=MIN_SCAN_INTERVAL,
-                            max=MAX_SCAN_INTERVAL,
+                        vol.Optional(CONF_POWER_SENSOR): EntitySelector(
+                            EntitySelectorConfig(
+                                filter={
+                                    "domain": "sensor",
+                                    "device_class": SensorDeviceClass.POWER,
+                                }
+                            )
                         ),
-                    ),
-                }
+                        vol.Optional(CONF_POWER_THRESHOLD): NumberSelector(
+                            NumberSelectorConfig(
+                                min=LOW_POWER_THRESHOLD,
+                                step="any",
+                                unit_of_measurement=UnitOfPower.WATT,
+                                mode=NumberSelectorMode.BOX,
+                            )
+                        ),
+                    }
+                ),
+                {
+                    CONF_POWER_THRESHOLD: DEFAULT_POWER_THRESHOLD,
+                    **self.config_entry.options,
+                    **(user_input or {}),
+                },
             ),
+            errors=errors,
         )

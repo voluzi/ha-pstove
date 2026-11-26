@@ -73,6 +73,21 @@ Under **Configure**, the polling interval defaults to 10 seconds and accepts
 10–300 seconds. Diagnostic registers are requested at most every five minutes;
 the last successful values remain visible between reads.
 
+To detect when the Wi-Fi board may be reporting a stale state, optionally
+select an external power sensor in watts under **Configure**. Use the power
+reading from the smart plug feeding the stove. Home Assistant raises a repair
+and turns on **Board state mismatch** when either condition holds continuously:
+
+- The plug draws at least the configured threshold (30 W by default) for
+  5 minutes while the board reports off, awaiting flame, standby, or an alarm.
+- The plug draws less than 10 W for 10 minutes while the board reports
+  lighting, running, ashpan cleaning, or final cleaning.
+
+The repair clears when the readings agree again. If either reading is
+unavailable, the repair clears, the diagnostic becomes unavailable, and the
+timer resets.
+This check never controls the stove or the smart plug.
+
 ## Entities
 
 Names below are shown without the device name prefix.
@@ -94,6 +109,7 @@ Names below are shown without the device name prefix.
 | Sensor | Ignition count | Number of ignitions | count |
 | Sensor | Total hours | Total operating time | h |
 | Sensor | Partial hours | Operating time on the stove's partial counter | h |
+| Binary sensor | Board state mismatch | Sustained disagreement with the configured external power sensor | — |
 
 ## Actions
 

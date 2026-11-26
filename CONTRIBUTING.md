@@ -12,15 +12,16 @@ Run these commands from the repository root:
 ```sh
 python3.14 -m venv .venv
 source .venv/bin/activate
-python -m pip install -r requirements_test.txt aiopelletstove==1.0.0
+python -m pip install -r requirements_test.txt
 ruff check .
 ruff format --check .
 mypy --strict custom_components
 pytest -q
 ```
 
-Tests use a simulated client; no physical device is needed. The default harness
-targets Home Assistant 2026.11.2. CI also checks 2025.4.4 and 2026.2.3.
+Tests use a simulated client; no physical device is needed. The test requirements
+pin aiopelletstove to 1.1.0. The default harness targets Home Assistant 2026.11.2.
+CI also checks 2025.4.4 and 2026.2.3.
 
 ## Releases
 
