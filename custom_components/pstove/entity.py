@@ -14,13 +14,16 @@ from .coordinator import PstoveConfigEntry, PstoveDataUpdateCoordinator
 class PstoveEntity(CoordinatorEntity[PstoveDataUpdateCoordinator]):
     _attr_has_entity_name = True
 
-    def __init__(self, entry: PstoveConfigEntry, key: str, name: str) -> None:
+    def __init__(
+        self, entry: PstoveConfigEntry, key: str, name: str | None = None
+    ) -> None:
         super().__init__(entry.runtime_data)
         registry_id = entry.data.get(
             CONF_REGISTRY_ID, entry.unique_id or entry.entry_id
         )
         self._attr_unique_id = f"{registry_id}_{key}"
-        self._attr_name = name
+        if name is not None:
+            self._attr_name = name
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, registry_id)},
             name=entry.title,

@@ -73,6 +73,23 @@ Under **Configure**, the polling interval defaults to 10 seconds and accepts
 10–300 seconds. Diagnostic registers are requested at most every five minutes;
 the last successful values remain visible between reads.
 
+To detect when the Wi-Fi board may be reporting a stale state, optionally
+select an external power sensor under **Configure**. Use the smart plug feeding
+the stove. The detector converts supported units, such as kW, to watts and
+becomes unavailable if the sensor reports an unsupported unit. Home
+Assistant raises a repair and turns on **Board state mismatch** when either
+condition holds continuously:
+
+- The plug draws at least the configured threshold (30 W by default) for
+  5 minutes while the board reports off, awaiting flame, standby, or an alarm.
+- The plug draws less than 10 W for 10 minutes while the board reports
+  lighting, running, ashpan cleaning, or final cleaning.
+
+The repair clears when the readings agree again. If either reading is
+unavailable, the repair clears, the diagnostic becomes unavailable, and the
+timer resets.
+This check never controls the stove or the smart plug.
+
 ## Entities
 
 Names below are shown without the device name prefix.
@@ -94,6 +111,8 @@ Names below are shown without the device name prefix.
 | Sensor | Ignition count | Number of ignitions | count |
 | Sensor | Total hours | Total operating time | h |
 | Sensor | Partial hours | Operating time on the stove's partial counter | h |
+| Binary sensor | Board state mismatch | Sustained disagreement with the configured external power sensor | — |
+| Button | Clear pending power command | Reset the local power guard and dismiss its notification | — |
 
 ## Actions
 
@@ -103,8 +122,29 @@ actions. Target the thermostat with `climate.turn_on`, `climate.turn_off`,
 `climate.set_preset_mode` (for example, `Level 3`). Use `switch.turn_on` and
 `switch.turn_off` for preferences, and `select.select_option` for fan regulation.
 
-The integration checks the power state before toggling; it does not toggle
-during final cleaning or when the stove reports an unknown state.
+The power state is read under the client's command lock before toggling. No
+toggle is sent during final cleaning, standby, an alarm, or an unknown state;
+the action fails with an explanation instead.
+
+The stove acknowledges a power command at once but reports the new power state
+only when its start or shutdown sequence begins, often a minute or more later.
+The thermostat initially shows the requested mode (`preheating` while starting)
+and reads the power state every 10 seconds. If the reported state changes, the
+thermostat shows the new state. Lighting or running confirms a start; only off
+confirms a shutdown.
+
+Because the power command is a toggle, a repeated command is ignored and a
+conflicting one is rejected while the outcome is uncertain, even if the stove
+did not acknowledge the command. The guard clears automatically when the
+board confirms the requested state or reports an alarm. Intermediate states
+such as standby and cleaning leave the guard in place.
+
+If the board reports an alarm or the command is still unconfirmed after
+3 minutes, the thermostat returns to the reported state and raises a persistent
+notification. After a timeout, it keeps polling and guarding the toggle.
+The guard persists when the integration reloads or its options change. To
+reset it manually, check the stove first, then press **Clear pending power
+command** on the device's diagnostics. The button sends no stove command.
 
 ## Diagnostics and troubleshooting
 

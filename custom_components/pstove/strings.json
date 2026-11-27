@@ -32,17 +32,68 @@
   "options": {
     "step": {
       "init": {
-        "title": "Polling options",
+        "title": "Polling and power monitoring",
         "data": {
-          "scan_interval": "Polling interval (seconds)"
+          "scan_interval": "Polling interval (seconds)",
+          "power_sensor": "External power sensor",
+          "power_threshold": "Active power threshold"
+        },
+        "data_description": {
+          "power_sensor": "Optional. Select the smart plug power sensor for the stove. Supported power units are converted to W. Unsupported units make the Board state mismatch diagnostic unavailable. Clear the selection to turn off mismatch detection.",
+          "power_threshold": "The power draw that suggests the stove is active. Defaults to 30 W."
         },
         "description": "Common status and preferences are polled every 10\u2013300 seconds. Diagnostics are fetched at most every 300 seconds."
       }
+    },
+    "error": {
+      "invalid_power_threshold": "Enter a finite power threshold in watts."
+    }
+  },
+  "entity": {
+    "button": {
+      "clear_pending_power_command": {
+        "name": "Clear pending power command"
+      }
+    },
+    "binary_sensor": {
+      "board_state_mismatch": {
+        "name": "Board state mismatch"
+      }
+    }
+  },
+  "issues": {
+    "board_state_mismatch": {
+      "title": "{stove}: Wi-Fi board may be reporting a stale state",
+      "description": "The stove state and the external power reading have disagreed for several minutes. Check the stove's display and make sure the selected power sensor measures the stove. This repair clears automatically when the readings agree again."
     }
   },
   "exceptions": {
     "whole_temperature_required": {
       "message": "Target temperature must be a whole number of degrees Celsius."
+    },
+    "final_cleaning": {
+      "message": "The stove is finishing its cleaning cycle. Turn it on again after it switches off."
+    },
+    "unknown_power_state": {
+      "message": "The stove reported an unknown power state ({state}). The command was not sent."
+    },
+    "power_change_pending": {
+      "message": "The stove has not confirmed the previous power command yet. Try again once it reports the new state."
+    },
+    "standby": {
+      "message": "The stove is in standby. Use the stove controls to switch it on or off."
+    },
+    "alarm": {
+      "message": "The stove reports an alarm. Clear it on the stove before using power commands."
+    },
+    "power_unacknowledged": {
+      "message": "The stove did not answer the power command. It may still act on it; its power state is being checked."
+    },
+    "power_rejected": {
+      "message": "The stove rejected the power command. Check the stove before trying again."
+    },
+    "thermostat_unavailable": {
+      "message": "The pellet stove thermostat is unavailable."
     }
   }
 }

@@ -38,11 +38,13 @@ class PstoveDataUpdateCoordinator(DataUpdateCoordinator[StoveState]):
                     DEFAULT_SCAN_INTERVAL,
                 )
             ),
-            always_update=False,
+            # An equal sample can supersede a direct power read.
+            always_update=True,
         )
         self.client = client
         self._next_diagnostics = 0.0
         self._diagnostics: StoveState | None = None
+        self.sampled_at = 0.0
 
     async def _async_update_data(self) -> StoveState:
         now = monotonic()
@@ -63,6 +65,7 @@ class PstoveDataUpdateCoordinator(DataUpdateCoordinator[StoveState]):
                 partial_hours=self._diagnostics.partial_hours,
                 ignition_count=self._diagnostics.ignition_count,
             )
+        self.sampled_at = now
         return state
 
 

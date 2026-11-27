@@ -12,7 +12,7 @@
   "issue_tracker": "https://github.com/voluzi/ha-pstove/issues",
   "loggers": ["aiopelletstove"],
   "requirements": [
-    "aiopelletstove==1.0.0"
+    "aiopelletstove==1.1.0"
   ],
-  "version": "1.0.0"
+  "version": "1.1.0"
 }

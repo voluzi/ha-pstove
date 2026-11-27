@@ -4,6 +4,7 @@ from unittest.mock import patch
 import pytest
 from aiohttp import ClientConnectionError
 from aiopelletstove import PelletStoveConnectionError
+from homeassistant.components import persistent_notification
 from homeassistant.config_entries import ConfigEntryState
 from homeassistant.helpers import entity_registry as er
 
@@ -18,6 +19,21 @@ async def test_unavailable_and_recovery(hass, setup_entry, mock_stove):
     await coordinator.async_refresh()
     await hass.async_block_till_done()
     assert hass.states.get("climate.pellet_stove_thermostat").state == "heat"
+
+
+async def test_removing_entry_dismisses_only_its_power_notification(hass, setup_entry):
+    own = f"pstove_{setup_entry.entry_id}_power"
+    other = "pstove_other_entry_power"
+    for notification in (own, other):
+        persistent_notification.async_create(
+            hass, "Power command not confirmed", notification_id=notification
+        )
+
+    await hass.config_entries.async_remove(setup_entry.entry_id)
+    await hass.async_block_till_done()
+    notifications = hass.data["persistent_notification"]
+    assert own not in notifications
+    assert other in notifications
 
 
 async def test_initial_failure_retries_setup(hass, entry, mock_stove):
@@ -64,6 +80,10 @@ async def test_registry_and_unload_reload(hass, setup_entry):
         (e.entity_id, e.unique_id.removeprefix("stove.example_")) for e in entities
     )
     assert contract == [
+        (
+            "button.pellet_stove_clear_pending_power_command",
+            "clear_pending_power_command",
+        ),
         ("climate.pellet_stove_thermostat", "thermostat"),
         ("select.pellet_stove_fan_2_regulation", "fan2_regulation"),
         ("select.pellet_stove_fan_3_regulation", "fan3_regulation"),
