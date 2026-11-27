@@ -80,6 +80,10 @@ async def test_registry_and_unload_reload(hass, setup_entry):
         (e.entity_id, e.unique_id.removeprefix("stove.example_")) for e in entities
     )
     assert contract == [
+        (
+            "button.pellet_stove_clear_pending_power_command",
+            "clear_pending_power_command",
+        ),
         ("climate.pellet_stove_thermostat", "thermostat"),
         ("select.pellet_stove_fan_2_regulation", "fan2_regulation"),
         ("select.pellet_stove_fan_3_regulation", "fan3_regulation"),

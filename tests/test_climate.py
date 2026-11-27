@@ -15,6 +15,7 @@ from aiopelletstove import (
 )
 from aiopelletstove.registers import POWER_LEVEL, POWER_STATE, TARGET_TEMPERATURE
 from homeassistant.components import persistent_notification
+from homeassistant.data_entry_flow import FlowResultType
 from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 from homeassistant.util import dt as dt_util
 
@@ -29,6 +30,7 @@ else:
     from pytest_homeassistant_custom_component.common import async_fire_time_changed
 
 ENTITY_ID = "climate.pellet_stove_thermostat"
+CLEAR_BUTTON = "button.pellet_stove_clear_pending_power_command"
 NOTIFICATION_PREFIX = "pstove_"
 
 
@@ -166,7 +168,7 @@ async def test_turn_on_shows_requested_mode_until_confirmed(
     await _tick(hass, freezer)
     assert _mode(hass) == ("heat", "preheating")
 
-    mock_stove.async_read.return_value = int(PowerState.AWAITING_FLAME_1)
+    mock_stove.async_read.return_value = int(PowerState.LIGHTING)
     await _tick(hass, freezer)
     assert _mode(hass) == ("heat", "heating")
     assert not _notifications(hass)
@@ -191,7 +193,7 @@ async def test_confirmation_outranks_an_older_full_poll(
 
     async def read_power(_register):
         read_finished.set()
-        return int(PowerState.FINAL_CLEANING)
+        return int(PowerState.OFF)
 
     mock_stove.async_get_state.side_effect = slow_state
     old_poll = hass.async_create_task(setup_entry.runtime_data.async_request_refresh())
@@ -217,17 +219,34 @@ async def test_confirmation_outranks_an_older_full_poll(
     assert _mode(hass) == ("heat", "heating")
 
 
-async def test_start_into_standby_shows_armed(
-    hass, setup_entry, mock_stove, stove_state, freezer
+@pytest.mark.parametrize(
+    "on,reported,mode",
+    [
+        (True, PowerState.AWAITING_FLAME_1, ("heat", "heating")),
+        (True, PowerState.AWAITING_FLAME_2, ("heat", "heating")),
+        (True, PowerState.STANDBY, ("heat", "idle")),
+        (True, PowerState.ASHPAN_CLEANING, ("heat", "heating")),
+        (False, PowerState.FINAL_CLEANING, ("off", "off")),
+        (False, PowerState.ASHPAN_CLEANING, ("heat", "heating")),
+    ],
+)
+async def test_intermediate_state_updates_display_without_releasing_guard(
+    hass, entry, mock_stove, freezer, on, reported, mode
 ):
-    mock_stove.async_set_power.return_value = TOGGLED_FROM_OFF
-    await _turn(hass, "turn_on")
-    mock_stove.async_read.return_value = int(PowerState.STANDBY)
-    mock_stove.async_get_state.return_value = replace(
-        stove_state, power_state=PowerState.STANDBY
+    hass.config_entries.async_update_entry(entry, options={"scan_interval": 300})
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+    mock_stove.async_set_power.return_value = (
+        TOGGLED_FROM_OFF if on else TOGGLED_FROM_RUNNING
     )
+    await _turn(hass, "turn_on" if on else "turn_off")
+    mock_stove.async_read.return_value = int(reported)
     await _tick(hass, freezer)
-    assert _mode(hass) == ("heat", "idle")
+    assert _mode(hass) == mode
+    with pytest.raises(ServiceValidationError) as error:
+        await _turn(hass, "turn_off" if on else "turn_on")
+    assert error.value.translation_key == "power_change_pending"
+    mock_stove.async_set_power.assert_awaited_once_with(on)
     assert not _notifications(hass)
 
 
@@ -276,7 +295,7 @@ async def test_timeout_keeps_polling_and_blocks_second_toggle(
     [
         (PowerState.OFF, PowerResult.TOGGLED),
         (PowerState.ALARM, PowerResult.BLOCKED),
-        (PowerState.ASHPAN_CLEANING, PowerResult.UNCHANGED),
+        (PowerState.ALARM_MEMORY, PowerResult.BLOCKED),
     ],
 )
 async def test_board_report_releases_timed_out_guard(
@@ -296,7 +315,7 @@ async def test_board_report_releases_timed_out_guard(
     await _tick(hass, freezer)
 
     mock_stove.async_set_power.return_value = _outcome(result, reported)
-    if reported == PowerState.ALARM:
+    if result == PowerResult.BLOCKED:
         [notification] = _notifications(hass)
         assert (
             "reported an alarm"
@@ -311,7 +330,7 @@ async def test_board_report_releases_timed_out_guard(
     assert mock_stove.async_set_power.await_count == 2
 
 
-async def test_lost_ack_uses_direct_reads_as_evidence_of_state_change(
+async def test_lost_ack_keeps_guard_until_requested_state(
     hass, setup_entry, mock_stove, freezer
 ):
     mock_stove.async_set_power.side_effect = PelletStovePowerOutcomeUnknownError
@@ -326,6 +345,11 @@ async def test_lost_ack_uses_direct_reads_as_evidence_of_state_change(
     mock_stove.async_set_power.assert_awaited_once_with(False)
 
     mock_stove.async_read.return_value = int(PowerState.RUNNING)
+    await _tick(hass, freezer)
+    await _turn(hass, "turn_off")
+    mock_stove.async_set_power.assert_awaited_once_with(False)
+
+    mock_stove.async_read.return_value = int(PowerState.OFF)
     await _tick(hass, freezer)
     mock_stove.async_set_power.return_value = TOGGLED_FROM_RUNNING
     await _turn(hass, "turn_off")
@@ -362,7 +386,7 @@ async def test_failed_and_unknown_reads_are_not_confirmation(
         await _turn(hass, "turn_on")
     assert error.value.translation_key == "power_change_pending"
 
-    mock_stove.async_read.return_value = int(PowerState.FINAL_CLEANING)
+    mock_stove.async_read.return_value = int(PowerState.OFF)
     await _tick(hass, freezer)
     assert not _notifications(hass)
     mock_stove.async_set_power.assert_awaited_once()
@@ -447,22 +471,79 @@ async def test_overlapping_commands_toggle_once(hass, setup_entry, mock_stove):
     mock_stove.async_set_power.assert_awaited_once()
 
 
-async def test_reload_clears_power_guard_but_keeps_timeout_notification(
+@pytest.mark.parametrize("timed_out", [False, True])
+async def test_options_change_keeps_power_guard(
+    hass, setup_entry, mock_stove, freezer, timed_out
+):
+    mock_stove.async_set_power.return_value = TOGGLED_FROM_RUNNING
+    mock_stove.async_read.return_value = int(PowerState.RUNNING)
+    await _turn(hass, "turn_off")
+    if timed_out:
+        await _tick(hass, freezer, POWER_CONFIRM_TIMEOUT + 1)
+    notifications = _notifications(hass)
+    assert bool(notifications) is timed_out
+
+    flow = await hass.config_entries.options.async_init(setup_entry.entry_id)
+    result = await hass.config_entries.options.async_configure(
+        flow["flow_id"], {"scan_interval": 30}
+    )
+    assert result["type"] == FlowResultType.CREATE_ENTRY
+    await hass.async_block_till_done()
+    assert setup_entry.runtime_data.update_interval == timedelta(seconds=30)
+    assert _notifications(hass) == notifications
+    with pytest.raises(ServiceValidationError) as error:
+        await _turn(hass, "turn_on")
+    assert error.value.translation_key == "power_change_pending"
+    await _turn(hass, "turn_off")
+    mock_stove.async_set_power.assert_awaited_once_with(False)
+
+
+async def test_clear_button_resets_guard_without_contacting_stove(
     hass, setup_entry, mock_stove, freezer
 ):
     mock_stove.async_set_power.return_value = TOGGLED_FROM_RUNNING
     mock_stove.async_read.return_value = int(PowerState.RUNNING)
     await _turn(hass, "turn_off")
     await _tick(hass, freezer, POWER_CONFIRM_TIMEOUT + 1)
-    notifications = _notifications(hass)
-    assert notifications
-    with pytest.raises(ServiceValidationError):
-        await _turn(hass, "turn_on")
+    assert _notifications(hass)
 
-    assert await hass.config_entries.async_reload(setup_entry.entry_id)
+    coordinator = setup_entry.runtime_data
+    mock_stove.async_get_state.side_effect = PelletStoveConnectionError
+    await coordinator.async_refresh()
+    assert hass.states.get(ENTITY_ID).state == "unavailable"
+    mock_stove.async_get_state.reset_mock()
+    mock_stove.async_read.reset_mock()
+    await hass.services.async_call(
+        "button", "press", {"entity_id": CLEAR_BUTTON}, blocking=True
+    )
+    assert not _notifications(hass)
+    mock_stove.async_get_state.assert_not_awaited()
+    mock_stove.async_set_power.assert_awaited_once_with(False)
+    mock_stove.async_write.assert_not_awaited()
+    await _tick(hass, freezer)
+    mock_stove.async_read.assert_not_awaited()
+
+    mock_stove.async_get_state.side_effect = None
+    await coordinator.async_refresh()
+    await _turn(hass, "turn_off")
+    assert mock_stove.async_set_power.await_count == 2
+
+
+async def test_removal_clears_power_guard(hass, setup_entry, mock_stove):
+    mock_stove.async_set_power.return_value = TOGGLED_FROM_RUNNING
+    await _turn(hass, "turn_off")
+    await hass.config_entries.async_remove(setup_entry.entry_id)
+    replacement = type(setup_entry)(
+        domain=setup_entry.domain,
+        title=setup_entry.title,
+        entry_id=setup_entry.entry_id,
+        unique_id=setup_entry.unique_id,
+        minor_version=setup_entry.minor_version,
+        data=setup_entry.data,
+    )
+    replacement.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(replacement.entry_id)
     await hass.async_block_till_done()
-    assert _notifications(hass) == notifications
-    assert _mode(hass) == ("heat", "heating")
     await _turn(hass, "turn_off")
     assert mock_stove.async_set_power.await_count == 2
 
@@ -490,13 +571,16 @@ async def test_detached_poll_leaves_replacement_pending(
         mock_stove.async_read.return_value = int(PowerState.OFF)
         assert await hass.config_entries.async_reload(setup_entry.entry_id)
         await _turn(hass, "turn_on")
-        assert mock_stove.async_set_power.await_count == 2
+        mock_stove.async_set_power.assert_awaited_once_with(True)
     finally:
         release.set()
     await hass.async_block_till_done()
     # The old entity's alarm read must not clear the replacement's command.
     assert _mode(hass) == ("heat", "preheating")
     assert not _notifications(hass)
+    with pytest.raises(ServiceValidationError) as error:
+        await _turn(hass, "turn_off")
+    assert error.value.translation_key == "power_change_pending"
 
 
 @pytest.mark.parametrize(

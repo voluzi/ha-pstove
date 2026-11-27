@@ -3,7 +3,6 @@
 import asyncio
 import logging
 from collections.abc import Callable
-from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from time import monotonic
 from typing import TYPE_CHECKING, Any
@@ -26,6 +25,7 @@ from homeassistant.components.climate.const import (
 from homeassistant.const import ATTR_TEMPERATURE, UnitOfTemperature
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
+from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.event import async_track_time_interval
 
@@ -37,52 +37,15 @@ from .const import (
 )
 from .coordinator import PstoveConfigEntry
 from .entity import PstoveEntity
+from .power import PendingPower, PowerTracker, power_cleared_signal, power_tracker
 
 PRESETS = [f"Level {level}" for level in range(1, 6)]
 
 _LOGGER = logging.getLogger(__name__)
 
-# States that show the stove accepted a power command. Standby means the stove
-# is switched on and waiting for the room to cool.
-_CONFIRMS_ON = frozenset(
-    {
-        PowerState.AWAITING_FLAME_1,
-        PowerState.AWAITING_FLAME_2,
-        PowerState.LIGHTING,
-        PowerState.RUNNING,
-        PowerState.ASHPAN_CLEANING,
-        PowerState.STANDBY,
-    }
-)
-_CONFIRMS_OFF = frozenset({PowerState.OFF, PowerState.FINAL_CLEANING})
+_CONFIRMS_ON = frozenset({PowerState.LIGHTING, PowerState.RUNNING})
+_CONFIRMS_OFF = frozenset({PowerState.OFF})
 _ALARMS = frozenset({PowerState.ALARM, PowerState.ALARM_MEMORY})
-
-
-@dataclass
-class PendingPower:
-    on: bool
-    deadline: float | None
-    acknowledged: bool = True
-    reference_state: PowerState | None = None
-
-    @property
-    def optimistic(self) -> bool:
-        return self.acknowledged and self.deadline is not None
-
-
-@dataclass
-class PowerTracker:
-    """Serialize toggles and track their outcome until the entry unloads."""
-
-    lock: asyncio.Lock = field(default_factory=asyncio.Lock)
-    pending: PendingPower | None = None
-    # Keep a direct confirmation until a newer full poll arrives.
-    confirmed: tuple[PowerState, float] | None = None
-
-
-def _power_tracker(hass: HomeAssistant, entry: PstoveConfigEntry) -> PowerTracker:
-    trackers: dict[str, PowerTracker] = hass.data.setdefault(DOMAIN, {})
-    return trackers.setdefault(entry.entry_id, PowerTracker())
 
 
 def _blocked_error(state: PowerState) -> HomeAssistantError:
@@ -106,7 +69,7 @@ async def async_setup_entry(
     entry: PstoveConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
-    async_add_entities([PstoveClimate(entry)])
+    async_add_entities([PstoveClimate(entry, power_tracker(hass, entry.entry_id))])
 
 
 class PstoveClimate(PstoveEntity, ClimateEntity):
@@ -124,22 +87,13 @@ class PstoveClimate(PstoveEntity, ClimateEntity):
         | ClimateEntityFeature.TURN_OFF
     )
 
-    def __init__(self, entry: PstoveConfigEntry) -> None:
+    def __init__(self, entry: PstoveConfigEntry, tracker: PowerTracker) -> None:
         super().__init__(entry, "thermostat", "Thermostat")
         self._entry = entry
-        self._tracker: PowerTracker | None = None
+        self._power = tracker
         self._cancel_poll: Callable[[], None] | None = None
         self._polling = False
         self._attached = False
-
-    @property
-    def _power(self) -> PowerTracker:
-        assert self._tracker is not None
-        return self._tracker
-
-    @property
-    def _pending(self) -> PendingPower | None:
-        return self._tracker.pending if self._tracker is not None else None
 
     @property
     def _notification_id(self) -> str:
@@ -147,9 +101,15 @@ class PstoveClimate(PstoveEntity, ClimateEntity):
 
     async def async_added_to_hass(self) -> None:
         await super().async_added_to_hass()
-        self._tracker = _power_tracker(self.hass, self._entry)
         self._attached = True
         self.async_on_remove(self._detach)
+        self.async_on_remove(
+            async_dispatcher_connect(
+                self.hass,
+                power_cleared_signal(self._entry.entry_id),
+                self._async_power_cleared,
+            )
+        )
         # A command started by the previous entity may still hold the lock.
         self.hass.async_create_task(self._async_resume_pending())
 
@@ -165,6 +125,11 @@ class PstoveClimate(PstoveEntity, ClimateEntity):
     def _detach(self) -> None:
         self._attached = False
         self._stop_power_poll()
+
+    @callback
+    def _async_power_cleared(self) -> None:
+        self._stop_power_poll()
+        self.async_write_ha_state()
 
     def _start_power_poll(self) -> None:
         if self._cancel_poll is None:
@@ -202,26 +167,25 @@ class PstoveClimate(PstoveEntity, ClimateEntity):
             return
         if state is not None and not state.is_known:
             state = None
+        if state is not None:
+            self._power.direct_read = (state, read_at)
+            if state != pending.optimistic_while:
+                pending.optimistic_while = None
+
         requested = "on" if pending.on else "off"
         if state in _ALARMS:
             self._finish_power(
-                state,
                 f"The stove reported an alarm after the power {requested} command. "
-                "Check the stove.",
-                read_at,
+                "Check the stove."
             )
             return
-        if state is not None:
-            target = _CONFIRMS_ON if pending.on else _CONFIRMS_OFF
-            if state in target or (
-                pending.reference_state is not None and state != pending.reference_state
-            ):
-                self._finish_power(state, None, read_at)
-                return
-            # A lost reply omits the pre-toggle state; use a fresh read for comparison.
-            pending.reference_state = state
+        if state in (_CONFIRMS_ON if pending.on else _CONFIRMS_OFF):
+            self._finish_power(None)
+            return
 
         if pending.deadline is None or monotonic() < pending.deadline:
+            if state is not None:
+                self.async_write_ha_state()
             return
         pending.deadline = None
         minutes = POWER_CONFIRM_TIMEOUT // 60
@@ -241,26 +205,18 @@ class PstoveClimate(PstoveEntity, ClimateEntity):
                 f"did not report the change within {minutes} minutes."
             )
         self._publish_power(
-            state,
-            f"{problem} Check the stove. Power commands are guarded until "
-            "the board reports a change or the integration is reloaded.",
-            read_at,
+            f"{problem} Check the stove before pressing Clear pending power command "
+            "to reset the guard manually."
         )
 
     @callback
-    def _finish_power(
-        self, state: PowerState | None, problem: str | None, read_at: float
-    ) -> None:
+    def _finish_power(self, problem: str | None) -> None:
         self._power.pending = None
         self._stop_power_poll()
-        self._publish_power(state, problem, read_at)
+        self._publish_power(problem)
 
     @callback
-    def _publish_power(
-        self, state: PowerState | None, problem: str | None, read_at: float
-    ) -> None:
-        if state is not None:
-            self._power.confirmed = (state, read_at)
+    def _publish_power(self, problem: str | None) -> None:
         if problem is None:
             persistent_notification.async_dismiss(self.hass, self._notification_id)
         else:
@@ -284,9 +240,9 @@ class PstoveClimate(PstoveEntity, ClimateEntity):
 
     @property
     def _power_state(self) -> PowerState:
-        """Newest known power state: a settling direct read or coordinator data."""
-        if self._tracker is not None and self._tracker.confirmed is not None:
-            state, read_at = self._tracker.confirmed
+        """Newest known power state from a direct read or a full poll."""
+        if self._power.direct_read is not None:
+            state, read_at = self._power.direct_read
             if self.coordinator.sampled_at < read_at:
                 return state
         return self.coordinator.data.power_state
@@ -294,11 +250,10 @@ class PstoveClimate(PstoveEntity, ClimateEntity):
     @callback
     def _handle_coordinator_update(self) -> None:
         if (
-            self._tracker is not None
-            and self._tracker.confirmed is not None
-            and self.coordinator.sampled_at >= self._tracker.confirmed[1]
+            self._power.direct_read is not None
+            and self.coordinator.sampled_at >= self._power.direct_read[1]
         ):
-            self._tracker.confirmed = None
+            self._power.direct_read = None
         super()._handle_coordinator_update()
 
     @property
@@ -306,13 +261,13 @@ class PstoveClimate(PstoveEntity, ClimateEntity):
         state = self._power_state
         # Standby is armed: the stove relights when the room cools.
         on = state.is_on or state == PowerState.STANDBY
-        if (pending := self._pending) is not None and pending.optimistic:
+        if (pending := self._power.pending) is not None and pending.optimistic:
             on = pending.on
         return HVACMode.HEAT if on else HVACMode.OFF
 
     @property
     def hvac_action(self) -> HVACAction:
-        if (pending := self._pending) is not None and pending.optimistic:
+        if (pending := self._power.pending) is not None and pending.optimistic:
             return HVACAction.PREHEATING if pending.on else HVACAction.OFF
         state = self._power_state
         if state == PowerState.STANDBY:
@@ -338,7 +293,10 @@ class PstoveClimate(PstoveEntity, ClimateEntity):
         on = hvac_mode == HVACMode.HEAT
         async with self._power.lock:
             if not self._attached:
-                raise HomeAssistantError("Pellet stove thermostat is unavailable")
+                raise HomeAssistantError(
+                    translation_domain=DOMAIN,
+                    translation_key="thermostat_unavailable",
+                )
             if (pending := self._power.pending) is not None:
                 if pending.on == on:
                     return
@@ -368,11 +326,11 @@ class PstoveClimate(PstoveEntity, ClimateEntity):
             except PelletStoveError as err:
                 raise HomeAssistantError("Pellet stove command failed") from err
             if outcome.result == PowerResult.TOGGLED:
-                self._power.confirmed = None
+                self._power.direct_read = None
                 self._power.pending = PendingPower(
                     on,
                     monotonic() + POWER_CONFIRM_TIMEOUT,
-                    reference_state=outcome.state,
+                    optimistic_while=outcome.state,
                 )
         if outcome.result == PowerResult.BLOCKED:
             raise _blocked_error(outcome.state)

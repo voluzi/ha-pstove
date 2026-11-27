@@ -11,13 +11,15 @@ All notable changes to this project are documented here. The format follows
 - Optionally compare the board's reported state with a smart plug's measured
   power. A sustained mismatch creates a repair and turns on the Board state
   mismatch diagnostic.
+- Add a diagnostic button to clear a pending power command locally after
+  checking the stove.
 
 ### Fixed
 
 - Keep checking the stove after a lost toggle acknowledgement. A rejected
   toggle or a failed read before dispatch does not delay another attempt.
-- Keep guarding power toggles after a confirmation timeout. Reloading the
-  integration resets the guard for manual recovery.
+- Keep guarding power toggles after a confirmation timeout and across reloads.
+  Intermediate board states no longer release the guard.
 - Convert external power readings from supported units to watts before
   checking for a board state mismatch.
 - Show standby as heat mode with an idle action, and keep a direct power

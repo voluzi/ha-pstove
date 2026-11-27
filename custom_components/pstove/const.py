@@ -20,6 +20,7 @@ POWER_CONFIRM_TIMEOUT = 180
 POWER_CONFIRM_POLL_INTERVAL = 10
 PLATFORMS = [
     Platform.BINARY_SENSOR,
+    Platform.BUTTON,
     Platform.CLIMATE,
     Platform.SELECT,
     Platform.SENSOR,

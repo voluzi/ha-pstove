@@ -39,7 +39,7 @@
           "power_threshold": "Active power threshold"
         },
         "data_description": {
-          "power_sensor": "Optional. Select the smart plug power sensor for the stove. Readings are converted to watts. Clear the selection to turn off mismatch detection.",
+          "power_sensor": "Optional. Select the smart plug power sensor for the stove. Supported power units are converted to W. Unsupported units make the Board state mismatch diagnostic unavailable. Clear the selection to turn off mismatch detection.",
           "power_threshold": "The power draw that suggests the stove is active. Defaults to 30 W."
         },
         "description": "Common status and preferences are polled every 10\u2013300 seconds. Diagnostics are fetched at most every 300 seconds."
@@ -50,6 +50,11 @@
     }
   },
   "entity": {
+    "button": {
+      "clear_pending_power_command": {
+        "name": "Clear pending power command"
+      }
+    },
     "binary_sensor": {
       "board_state_mismatch": {
         "name": "Board state mismatch"
@@ -86,6 +91,9 @@
     },
     "power_rejected": {
       "message": "The stove rejected the power command. Check the stove before trying again."
+    },
+    "thermostat_unavailable": {
+      "message": "The pellet stove thermostat is unavailable."
     }
   }
 }
